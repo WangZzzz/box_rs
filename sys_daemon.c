@@ -1,6 +1,6 @@
 /*******************************
  * Filename : sys_daemon.c
- * Date : 2015-03-06
+ * Date : 2015-05-09
  * *****************************/
 
 
@@ -13,7 +13,6 @@
 #define apache2 "service apache2 start"
 
 #define mydns "/ailvgo/system/domain/mydns &"
-#define dnsmasq "service dnsmasq start"
 
 #define logfile "/ailvgo/system/log/sys_log"
 
@@ -53,7 +52,7 @@ int check_mydns_memory()
 	fread(buf, sizeof(char), sizeof(buf), stream);
 	buf[1023] = '\0';
 	sscanf(buf, "%s", &pid);
-    pclose(stream);
+    	pclose(stream);
 
 	printf("mydns pid : %s\n", pid);
 
@@ -97,7 +96,7 @@ main()
 {
 	FILE *stream = NULL;
 	char buf[1024] = {0};
-	int cnt_apache2 = 0, cnt_dnsmasq = 0, cnt_mydns = 0;
+	int cnt_apache2 = 0, cnt_mydns = 0;
 
 	int loop = 0;
 
@@ -116,7 +115,7 @@ main()
         printf("---------check apache2-----------\n");
  		stream = NULL;
 		if((stream = popen("ps -ef | grep 'apache2' | grep -v 'grep' | grep -v 'sh -c' | awk '{print $2}' | wc -l", "r")) == NULL)
-                	printf("popen failed\n");
+            printf("popen failed\n");
 		memset(buf, 0, sizeof(buf));
 		fread(buf, sizeof(char), sizeof(buf), stream);
 		buf[1023] = '\0';
@@ -137,36 +136,25 @@ main()
 
 
 			
-        printf("---------check mydns & dnsmasq-----------\n");
+        printf("---------check mydns-----------------\n");
  		stream = NULL;
 		if((stream = popen("ps -ef | grep 'mydns' | grep -v 'grep' | grep -v 'sh -c' | awk '{print $2}' | wc -l", "r")) == NULL)
-                        printf("popen failed\n");
+            printf("popen failed\n");
 		memset(buf, 0, sizeof(buf));
 		fread(buf, sizeof(char), sizeof(buf), stream);
 		buf[1023] = '\0';
 		sscanf(buf, "%d", &cnt_mydns);
-                pclose(stream);
+        pclose(stream);
 		printf("mydns process : %d\n", cnt_mydns);
-                sleep(1);
+        sleep(1);
 
- 			stream = NULL;
-			if((stream = popen("ps -ef | grep 'dnsmasq' | grep -v 'grep' | grep -v 'sh -c' | awk '{print $2}' | wc -l", "r")) == NULL)
-                        	printf("popen failed\n");
-			memset(buf, 0, sizeof(buf));
-			fread(buf, sizeof(char), sizeof(buf), stream);
-			buf[1023] = '\0';
-			sscanf(buf, "%d", &cnt_dnsmasq);
-                	pclose(stream);
-			printf("dnsmasq process : %d\n", cnt_dnsmasq);
-
-		if((cnt_mydns>=1) && (cnt_dnsmasq == 0))
+		if(cnt_mydns >= 1)
 		{
 			if((loop%20) == 0)
 			{
-				printf("1 hour!\n");
-				//printf("time up! mydns restart!\n");
-				//system("killall mydns");
-				//cnt_mydns = 0;
+			    printf("time up! mydns restart!\n");
+				system("killall mydns");
+				cnt_mydns = 0;
 			}
 			else
 			{
@@ -182,28 +170,21 @@ main()
 			}
 		}
 
-                if(cnt_dnsmasq >= 1)
-                        printf("dnsmasq : ok!");
-
-		if((cnt_mydns == 0) && (cnt_dnsmasq ==0))
-    		{
-                        printf("dnsmasq & mydns : down, restart again...\n");
-                        
-                        if(access("/ailvgo/system/domain/mydns", W_OK) == 0)
-				system(mydns);
-                        else
-                                system(dnsmasq);
-                }
+		if(cnt_mydns == 0)
+    	{
+			printf("mydns : down, restart again...\n");
+            system(mydns);
+        }
 
 		// check box uptime
  		stream = NULL;
 		if((stream = popen("cat /proc/uptime | grep -v 'grep' | grep -v 'sh -c' | awk '{print $1}'", "r")) == NULL)
-                        printf("popen failed\n");
+            printf("popen failed\n");
 		memset(buf, 0, sizeof(buf));
 		fread(buf, sizeof(char), sizeof(buf), stream);
 		buf[1023] = '\0';
 		sscanf(buf, "%f", &box_uptime);
-                pclose(stream);
+        pclose(stream);
 
 		printf("box_uptime : %.2f\n", box_uptime);
 
@@ -215,8 +196,8 @@ main()
 			system("reboot");
 		}
 
-       }
+    }
  
-       printf("------------sys_daemon : over------------\n");
-       return 0;
+    printf("------------sys_daemon : over------------\n");
+    return 0;
 }

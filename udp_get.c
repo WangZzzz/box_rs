@@ -17,8 +17,10 @@
 #include <stdio.h> 
 #include <math.h>
 
+#define box_db "/ailvgo/www/database/box.db"
 #define traffic_db "/ailvgo/system/traffic/traffic.db"
 #define traffic_total_db "/ailvgo/system/traffic/traffic_total.db"
+#define traffic_saved_db "/ailvgo/system/traffic/traffic_saved.db"
 #define wifi_dbm "/ailvgo/system/traffic/wifi_dbm"
 #define staff_db "/ailvgo/system/traffic/staff.db"
 #define staff_ctl "/ailvgo/system/traffic/staff_ctl"
@@ -27,10 +29,11 @@
 #define CNT 15000   // buffer_mac size
 #define SEC 43200  // 3600*12
 #define BORDER 10000  // traffic backup threshold
-#define NUM 600 // loop_mac size in 60 seconds
+#define NUM 1000 // loop_mac size in 60 seconds
 #define STAFF_SIZE 100
 
-# define logfile "/ailvgo/system/sys_log"
+#define wifi_mac "/ailvgo/system/traffic/wifi_mac"
+# define logfile "/ailvgo/system/log/sys_log"
 
 int get_dbm(int m)
 {
@@ -55,6 +58,15 @@ int get_dbm(int m)
 	return -dbm;
 }
 
+void mac_log(char *str)
+{
+	FILE *fp;
+        
+	fp = fopen(wifi_mac, "w");
+	fputs(str,fp);
+	fclose(fp);
+}
+
 void sys_log(char *str)
 {
 	FILE *fp;
@@ -72,14 +84,14 @@ void sys_log(char *str)
 }
 
 int get_time(int n);
-int traffic_mv();
-void traffic_collet(char *mac_get,int time_get, sqlite3 *db);
-void traffic_total_collect(char *mac_get,int time_get, sqlite3 *db);
+int traffic_collet(char *mac_get,int time_get, sqlite3 *db);
+int traffic_total_collect(char *mac_get,int time_get, sqlite3 *db);
 void ap_socket();
-void error_log(char *str);
 void record_staff();
-
-const char *db_back="/ailvgo/system/traffic/traffic_";
+char* traffic_upload_create();
+void traffic_saved_check();
+void traffic_total_check();
+void traffic_check();
 
 int main()
 {
@@ -87,52 +99,16 @@ int main()
 	sqlite3 *db=NULL;
 	char *errmsg;
 	
-	printf("----------check traffic.db & traffic_total.db---------\n");
-        if(access(traffic_db, W_OK) == -1)
-        {
-        	printf("traffic.db not exist!\n");
-        	sys_log("traffic.db not exist!");
-        	return 0;
- 	}
-	else
-		printf("traffic.db : ok!\n");
+	int cnt = 0;
 	
-        if(access(traffic_total_db, W_OK) == -1)
-        {
-        	printf("traffic_total.db not exist!\n");
-        	sys_log("traffic_total.db not exist!");
-        	return 0;
- 	}
-	else
-		printf("traffic_total.db : ok!\n");
-
-	printf("-----------delete & vacuum traffic_total.db------------\n");
-	rc=sqlite3_open(traffic_total_db,&db);
-	if(rc!=SQLITE_OK)
-	{
-		fprintf(stderr,"Cannot open traffic_total.db:%s\n",sqlite3_errmsg(db));
-	}
-
-	rc = sqlite3_exec(db,"delete from traffic_total",NULL,NULL,&errmsg);
-	if(SQLITE_OK == rc)
-		printf("delete traffic_total.db success!\n");
-	else if(rc!=SQLITE_OK)
-		printf("delete traffic_total.db error:%s\n",errmsg);
+	printf("----------traffic.db : check------------------\n");
+	traffic_check();
 	
-	rc = sqlite3_exec(db,"vacuum traffic_total",NULL,NULL,&errmsg);
-	if(SQLITE_OK == rc)
-		printf("vacuum traffic_total.db success!\n");
-	else if(rc!=SQLITE_OK)
-		printf("vacuum traffic_total.db error:%s\n",errmsg);
+	printf("--------traffic_total.db : check------------\n");
+	traffic_total_check();
 
-	sqlite3_close(db);
-
-	printf("----------------backup traffic.db---------------------\n");
-
-	if(traffic_mv()==0)
-        	printf("traffic.db mv failure!\n");
-	else
-		printf("traffic.db mv success!\n");
+	printf("--------traffic_saved.db : check------------\n");
+	traffic_saved_check();
 
 	ap_socket();
 
@@ -143,10 +119,10 @@ int main()
 	return 0;
 }
 
-void traffic_total_collect(char *mac_get,int time_get, sqlite3 *db)
+int traffic_total_collect(char *mac_get,int time_get, sqlite3 *db)
 {
 	int rc = 0;
-        char sql[250]={0};
+    	char sql[250]={0};
 	char *errmsg; 
 	sqlite3_stmt *ppstmt=NULL;
 
@@ -156,32 +132,37 @@ void traffic_total_collect(char *mac_get,int time_get, sqlite3 *db)
 	rc = sqlite3_step(ppstmt);
 	if(rc!=SQLITE_ROW)
 	{
+		sqlite3_finalize(ppstmt);
 		memset(sql,0,sizeof(sql));
 		sprintf(sql,"insert into traffic_total (mobile,time) values('%s','%ld')",mac_get,time_get);
 		rc = sqlite3_exec(db,sql,NULL,NULL,&errmsg);
 		if(SQLITE_OK!=rc)
 		{
 			printf("insert traffic_total.db error : %s\n",errmsg);
-			return;
+			return 1;
 		}
+		else
+		  return 0;
 	}
-	if(rc==SQLITE_ROW)
+	else
 	{
+		sqlite3_finalize(ppstmt);
 		memset(sql,0,sizeof(sql));
 		sprintf(sql,"update traffic_total set time='%ld' where mobile='%s'",time_get,mac_get);
 		rc = sqlite3_exec(db,sql,NULL,NULL,&errmsg);
 		if(SQLITE_OK!=rc)
 		{
 			printf("update traffic_total.db error : %s\n",errmsg);
-			return;
+			return 2;
 		}
+		else
+		  return 0;
 	}
-	sqlite3_finalize(ppstmt);
 }
 
-void traffic_collect(char *mac_get,int time_get, sqlite3 *db)
+int traffic_collect(char *mac_get,int time_get, sqlite3 *db)
 {
-    int rc = 0;
+    	int rc = 0;
 	char sql[250]={0};
 	char *errmsg;
 	int time_data=0;
@@ -193,31 +174,41 @@ void traffic_collect(char *mac_get,int time_get, sqlite3 *db)
 	rc = sqlite3_step(ppstmt);
 	if(rc!=SQLITE_ROW)
 	{
+		sqlite3_finalize(ppstmt);
 		memset(sql,0,sizeof(sql));
 		sprintf(sql,"insert into traffic_info (mobile,time) values('%s','%ld')",mac_get,time_get);
 		rc = sqlite3_exec(db,sql,NULL,NULL,&errmsg);
 		if(SQLITE_OK!=rc)
 		{
 			printf("insert traffic.db error : %s\n",errmsg);
-			return;
+			return 1;
 		}
+		else
+		  return 0;
 	}
-	if(rc==SQLITE_ROW)
+	else
 	{
 		time_data=sqlite3_column_int(ppstmt,0);
 		if(time_get - time_data > SEC)
 		{
+			sqlite3_finalize(ppstmt);
 			memset(sql,0,sizeof(sql));
 			sprintf(sql,"insert into traffic_info (mobile,time) values('%s','%ld')",mac_get,time_get);
 			rc = sqlite3_exec(db,sql,NULL,NULL,&errmsg);
 			if(SQLITE_OK!=rc)
 			{
 				printf("insert traffic.db error : %s\n",errmsg);
-				return;
+				return 2;
 			}
+			else
+			  return 0;
+		}
+		else
+		{
+			sqlite3_finalize(ppstmt);
+			return 0;
 		}
 	}
-	sqlite3_finalize(ppstmt);
 }
 
 
@@ -236,22 +227,36 @@ void ap_socket()
 	int loop_t[NUM];
 	int m, n;
 	char signal[5] = {0};
-        int signal_t = 0, dbm =0;
+    int signal_t = 0, dbm =0;
 	int rc = 0;
 	char sql[250] = {0}, staff_mac[STAFF_SIZE][18] = {0};
 	const char *tmp_mobile = NULL;
 	int num = 0,staff_flag = 0;
+	int mac_flag = 0;
 	sqlite3 *db=NULL;
 	sqlite3_stmt *ppstmt = NULL;
+	int collect_cnt;
+
+	int loop_cnt = 0;
+	char upload_db[200] = {0};
+    char sh_cmd[200] = {0};
+
+	// create boxid_date.db
+	printf("----------create boxid_date.db------------\n");
+	char *get_upload_db = traffic_upload_create();
+
+	strcpy(upload_db, get_upload_db);
+
+	free(get_upload_db);
 
 	// get theshold dbm from wifi_dbm
 	printf("--------------check wifi_dbm------------\n");
 	int threshold = -95;
 	FILE *fp;
-        if(access(wifi_dbm, W_OK) == 0)
+    if(access(wifi_dbm, W_OK) == 0)
 	{
-        	if((fp = fopen(wifi_dbm, "r")) == NULL)
-             		perror("wifi_dbm open error!\n");
+        if((fp = fopen(wifi_dbm, "r")) == NULL)
+        	perror("wifi_dbm open error!\n");
 		
 		fscanf(fp,"%d", &threshold);
 		fclose(fp);
@@ -265,8 +270,8 @@ void ap_socket()
 	int staff=0;
 	if(access(staff_ctl, W_OK) == 0)
 	{
-        	if((fp = fopen(staff_ctl, "r")) == NULL)
-             		perror("staff_ctl open error!\n");
+        if((fp = fopen(staff_ctl, "r")) == NULL)
+            perror("staff_ctl open error!\n");
 		
 		fscanf(fp,"%d", &staff);
 		fclose(fp);
@@ -279,12 +284,13 @@ void ap_socket()
 	{
 		// get staff mac from traffic.db
 		printf("staff mac control : on\n");
-		record_staff();
+		
 		rc = sqlite3_open(staff_db, &db);
 		if(rc != SQLITE_OK)
 		{
 			printf("open staff.db error!!!\n");
 		}
+
 		memset(sql,0,sizeof(sql));
 		sprintf(sql,"select mobile from staff_info order by time desc limit 100");
 		rc = sqlite3_prepare(db,sql,-1,&ppstmt,0);
@@ -292,6 +298,7 @@ void ap_socket()
 		{
 			fprintf(stderr,"SQL error:%s \n",sqlite3_errmsg(db));
 		}
+
 		rc = sqlite3_step(ppstmt);
 		while(rc == SQLITE_ROW)
 		{
@@ -330,9 +337,9 @@ void ap_socket()
         
 	while(1)
 	{	
-		loop_t1 = time(NULL);
+		loop_t1 = time(NULL)+8*3600;
 
-		printf("********** new loop | loop_t1 : %d ************\n", loop_t1);
+		printf("**********loop_cnt : %d | loop_t1 : %d ************\n", loop_cnt, loop_t1);
 
 		m = 0;
 
@@ -343,7 +350,7 @@ void ap_socket()
 			memset(ap_mac, 0, sizeof(ap_mac));
 			memset(buffer_rec, 0, sizeof(buffer_rec));
 
-	        	flag_new = 0, flag_total = 0;
+	        flag_new = 0, flag_total = 0;
 
 			len = recvfrom(sockfd, buffer_rec, sizeof(buffer_rec), 0, (struct sockaddr *)&addr, &addr_len);
 	
@@ -354,7 +361,7 @@ void ap_socket()
 				sprintf(signal, "%02x%02x", (0xff & buffer_rec[26]), (0xff & buffer_rec[27]));
 				signal_t = (0xff&buffer_rec[26])*(0x100)+(0xff&buffer_rec[27]);
 				dbm = get_dbm(signal_t);
-				t=time(NULL);
+				t=time(NULL)+8*3600;
 				printf("mac : %s  || signal : %s || dbm : %d || time : %d\n", mac, signal, dbm, t);
 				
 				// check signal beyond/lower threshold
@@ -435,7 +442,12 @@ void ap_socket()
 			{	
 				printf("receive heartbeat!\n");
 				sprintf(ap_mac, "%02x:%02x:%02x:%02x:%02x:%02x", (0xff & buffer_rec[2]), (0xff & buffer_rec[3]), (0xff & buffer_rec[4]), (0xff & buffer_rec[5]), (0xff & buffer_rec[6]), (0xff & buffer_rec[7]));
-			
+				if(mac_flag==0)
+				{
+					printf("wifi_mac record**************\n");
+					mac_log(ap_mac);
+					mac_flag = 1;
+				}
 				sprintf(buffer_send,"\x65\x82%c%c%c%c%c%c\x01\x01\xB1\x00\x00\x04\x00\x00\x00\x00",buffer_rec[2],buffer_rec[3],buffer_rec[4],buffer_rec[5],buffer_rec[6],buffer_rec[7]);
 	
 				if(sendto(sockfd, buffer_send, 18, 0, (struct sockaddr *)&addr, addr_len)==-1)  
@@ -473,11 +485,25 @@ void ap_socket()
 			if(rc!= SQLITE_OK)
 			{
 				printf("open traffic.db error!!!!!!\n");
-				return;
+				continue;
 			}
 
 			for(n=0	; n<m;	n++)
-				traffic_collect(loop_mac[n], loop_t[n], db);
+			{
+				collect_cnt = 0;
+
+				while(collect_cnt < 20)
+				{
+					if(traffic_collect(loop_mac[n], loop_t[n], db) != 0)
+					{
+						printf("collect in traffic.db failure!\n");
+						usleep(200);
+						collect_cnt++;
+					}
+					else
+						break;
+				}
+			}
 
 			sqlite3_close(db);
 
@@ -487,17 +513,39 @@ void ap_socket()
 			if(rc!= SQLITE_OK)
 			{
 				printf("open traffic_total.db error!!!!!!\n");
-				return;
+				continue;
 			}
 		
 			for(n=0	; n<m;	n++)
-				traffic_total_collect(loop_mac[n], loop_t[n], db);
+			{
+				collect_cnt = 0;
 
+				while(collect_cnt < 20)
+				{
+					if(traffic_total_collect(loop_mac[n], loop_t[n], db) != 0)
+					{
+						printf("collect in traffic_total.db failure!\n");
+						usleep(200);
+						collect_cnt++;
+					}
+					else
+						break;
+				}
+			}
 			sqlite3_close(db);
+		}
+		
+		loop_cnt++;
+		
+		if((loop_cnt % 10) == 0)
+		{
+			printf("------------move traffic_total.db to boxid_date.db---------\n");
+			sprintf(sh_cmd, "/ailvgo/system/traffic/udp_move %s &", upload_db);
+			system(sh_cmd);
 		}
 	} 
 	close(sockfd);
-        sys_log("udp_get error : ap_socket");
+    	sys_log("udp_get error : ap_socket");
 }
 
 int get_time(int n)
@@ -528,79 +576,6 @@ int get_time(int n)
 	}
 }
 
-int traffic_mv()
-{
-	sqlite3 *db;
-	char sql[256] = {0}, db_time[100] = {0}, sys[256] = {0};
-	int rc = 0;
-	long data = 0, reserve = 0;
-	char *errmsg;
-	sqlite3_stmt *ppstmt = NULL;
-	
-	rc=sqlite3_open(traffic_db,&db);
-	if(rc!=SQLITE_OK)
-	{
-		printf("open traffic.db failure!\n");
-		return 0;
-	}
-
-	memset(sql,0,sizeof(sql));
-	sprintf(sql,"select count(*) from traffic_info");
-	sqlite3_prepare(db,sql,-1,&ppstmt,0);
-	rc = sqlite3_step(ppstmt);
-	if(rc==SQLITE_ROW)
-	{
-		data=sqlite3_column_int(ppstmt,0);
-		printf("number in traffic.db : %ld\n",data);
-	}
-	sqlite3_finalize(ppstmt);
-	
-	if(data<BORDER)
-		printf("backup traffic.db is unnecessary!\n");
-	else
-	{
-		printf("backup traffic.db ...\n");
-		sprintf(db_time,"%4d%02d%02d%02d%02d",get_time(1),get_time(2),get_time(3),get_time(4),get_time(5));
-		sprintf(sys,"cp -rf /ailvgo/system/traffic/traffic.db %s%s.db",db_back,db_time);
-		printf("sys : %s\n",sys);
-		system(sys);
-		sleep(3);
-
-		reserve = data - 500;
-
-		memset(sql,0,sizeof(sql));
-		sprintf(sql,"delete from traffic_info where time in (select time from traffic_info order by time asc limit 0, %ld)", reserve);
-		printf("sql : %s\n", sql);
-		rc = sqlite3_exec(db,sql,NULL,NULL,&errmsg);
-		if(SQLITE_OK==rc)
-		{
-			printf("delete traffic.db success!\n");
-		}
-		else if(rc!=SQLITE_OK)
-		{
-			printf("delete traffic.db error:%s\n",errmsg);
-			sqlite3_close(db);
-			return 0;
-		}
-
-		memset(sql,0,sizeof(sql));
-		sprintf(sql,"vacuum traffic_info");
-		rc = sqlite3_exec(db,sql,NULL,NULL,&errmsg);
-		if(SQLITE_OK==rc)
-		{
-			printf("vacuum traffic.db success!\n");
-		}
-		else if(rc!=SQLITE_OK)
-		{
-			printf("vacuum traffic.db error:%s\n",errmsg);
-			sqlite3_close(db);
-			return 0;
-		}
-	}
-	sqlite3_close(db);
-        return 1;
-}
-
 void record_staff()
 {
 	int rc1 = 0 , rc2 = 0;
@@ -610,7 +585,6 @@ void record_staff()
 	sqlite3 *db1,*db2;
 	sqlite3_stmt *ppstmt1 = NULL,*ppstmt2 = NULL;
 
-	printf("------------check staff mac in traffic.db------------\n");
 	rc1 = sqlite3_open(traffic_db, &db1);
 	if(rc1 != SQLITE_OK)
 	{
@@ -654,9 +628,8 @@ void record_staff()
 		sprintf(sql,"select * from staff_info where mobile ='%s'", staff_mobile);
 		rc2 = sqlite3_prepare(db2,sql,-1,&ppstmt2,0);
 		if(rc2 != SQLITE_OK)
-	    	{
 			fprintf(stderr,"SQL error:%s\n",sqlite3_errmsg(db2));
-		}
+		
 		rc2 = sqlite3_step(ppstmt2);
 		if(rc2 == SQLITE_ROW)
 		{
@@ -672,9 +645,8 @@ void record_staff()
 		}
 		rc2 = sqlite3_exec(db2,sql,NULL,NULL,&errmsg);
 		if(rc2 != SQLITE_OK)
-		{
 			printf("insert/update staff.db error:%s\n",errmsg);
-		}
+		
 		rc1 = sqlite3_step(ppstmt1);
 	}
 	sqlite3_finalize(ppstmt1);
@@ -682,3 +654,456 @@ void record_staff()
 	sqlite3_close(db1);
 	sqlite3_close(db2);
 }
+
+char* traffic_upload_create()
+{
+	int rc = 0;
+	sqlite3 *db = NULL;
+    sqlite3_stmt *ppstmt = NULL;
+    char sql_cmd[100] = {0};
+	char *errmsg = NULL;
+	const char *box_id = NULL;
+    char box_id_tmp[10] = {0};
+
+	char db_filename[20] ={0};
+	char *db_filename_full = (char*)malloc(sizeof(char)*200);
+	char shell_cmd[200] = {0};
+	
+	int cnt = 0;
+
+	while(cnt < 20)
+	{
+		rc = sqlite3_open(box_db, &db);
+		if(rc == SQLITE_ERROR)
+			printf("open box.db failed");
+
+		ppstmt = NULL;
+		memset(sql_cmd, 0, sizeof(sql_cmd));
+		strcpy(sql_cmd, "select box_id from box_info");
+		sqlite3_prepare(db, sql_cmd, -1, &ppstmt, 0);
+		rc = sqlite3_step(ppstmt);
+		if(rc == SQLITE_ROW)
+		{
+	        box_id = sqlite3_column_text(ppstmt, 0);
+        	strcpy(box_id_tmp, box_id);
+            printf("box_id : %s\n", box_id_tmp);
+			sqlite3_finalize(ppstmt);
+			sqlite3_close(db);
+			break;
+		}
+		else
+		{	
+			printf("select box_id failure!\n");
+			sqlite3_finalize(ppstmt);
+			sqlite3_close(db);
+			sleep(3);
+			cnt++;
+		}
+	}
+	
+	if(strlen(box_id_tmp) < 4)
+	{
+		printf("get box_id failure!\n");
+		free(db_filename_full);
+		return "null";
+	}
+
+	sprintf(db_filename,"%s_%4d%02d%02d.db",box_id_tmp, get_time(1), get_time(2), get_time(3));
+	printf("db_filename for upload : %s\n", db_filename);
+
+	sprintf(db_filename_full,"/ailvgo/system/traffic/%s",db_filename);
+	printf("db_filename_full for upload : %s\n", db_filename_full);
+
+	if(access(db_filename_full, W_OK) == -1)
+	{
+		printf("creating %s for upload\n", db_filename);
+		sprintf(shell_cmd, "cp -f /ailvgo/system/traffic/traffic.db %s",db_filename_full);
+		printf("shell_cmd : %s\n", shell_cmd);
+		system(shell_cmd);
+
+		sleep(1);
+		
+		cnt = 0;
+		while(cnt < 20)
+		{
+			rc=sqlite3_open(db_filename_full, &db);
+			if(rc!=SQLITE_OK)
+				fprintf(stderr,"Cannot open boxid_date.db:%s\n",sqlite3_errmsg(db));
+
+			rc = sqlite3_exec(db,"delete from traffic_info",NULL,NULL,&errmsg);
+			if(SQLITE_OK == rc)
+			{
+				printf("delete boxid_date.db success!\n");
+				sqlite3_close(db);
+				break;
+			}
+			else
+			{
+				printf("delete boxid_date.db error:%s\n",errmsg);
+				sqlite3_close(db);
+				sleep(2);
+				cnt++;
+			}
+		}
+	
+		cnt = 0;
+		while(cnt < 20)
+		{
+			rc=sqlite3_open(db_filename_full, &db);
+			if(rc!=SQLITE_OK)
+				fprintf(stderr,"Cannot open boxid_date.db:%s\n",sqlite3_errmsg(db));
+
+			rc = sqlite3_exec(db,"vacuum traffic_info",NULL,NULL,&errmsg);
+			if(SQLITE_OK == rc)
+			{
+				printf("vacuum boxid_date.db success!\n");
+				sqlite3_close(db);
+				break;
+			}
+			else
+			{
+				printf("vacuum boxid_date.db error:%s\n",errmsg);
+				sqlite3_close(db);
+				sleep(2);
+				cnt++;
+			}
+		}
+
+	}
+	else
+		printf("%s : exist, don't need create!\n", db_filename);
+
+	return db_filename_full;
+}
+
+void traffic_total_check()
+{
+    int traffic_total_exist = 0;
+	int rc = 0;
+	sqlite3 *db = NULL;
+	char *errmsg = NULL;
+	int sql_cnt = 0;
+
+	if(access(traffic_total_db, W_OK) == -1)
+	{
+        printf("traffic_total.db : not exist!\n");
+        sys_log("traffic_total.db : not exist!");
+        traffic_total_exist = 0;
+ 	}
+	else
+	{
+		printf("traffic_total.db : exist!\n");	
+		traffic_total_exist = 1;
+	}
+
+	if(traffic_total_exist == 0)
+	{	
+
+		printf("creat traffic_total.db using traffic.db\n");
+
+		printf("cp -f /ailvgo/system/traffic/traffic.db /ailvgo/system/traffic/traffic_total.db\n");
+		system("cp -f /ailvgo/system/traffic/traffic.db /ailvgo/system/traffic/traffic_total.db");
+		sleep(1);		
+
+		sql_cnt = 0;
+		while(sql_cnt < 20)
+		{
+			rc=sqlite3_open(traffic_total_db, &db);
+			if(rc!=SQLITE_OK)
+				printf("Cannot open traffic_total.db!\n");
+
+			rc = sqlite3_exec(db,"DROP TABLE traffic_info",NULL,NULL,&errmsg);
+			if(SQLITE_OK == rc)
+			{
+				printf("drop table in traffic_total.db success!\n");
+				sqlite3_close(db);
+				break;
+			}
+			else
+			{
+				printf("drop table in traffic_total.db failure!\n");
+				sqlite3_close(db);
+				sleep(1);
+				sql_cnt++;
+			}
+		}
+		
+		sql_cnt = 0;
+		while(sql_cnt < 20)
+		{
+			rc=sqlite3_open(traffic_total_db, &db);
+			if(rc!=SQLITE_OK)
+				printf("Cannot open traffic_total.db!\n");
+
+			rc = sqlite3_exec(db,"CREATE TABLE traffic_total (mobile TEXT, time INTEGER)",NULL,NULL,&errmsg);
+			if(SQLITE_OK == rc)
+			{
+				printf("create table in traffic_total.db success!\n");
+				sqlite3_close(db);
+				break;
+			}
+			else
+			{
+				printf("create table in traffic_total.db failure!\n");
+				sqlite3_close(db);
+				sleep(1);
+				sql_cnt++;
+			}
+		}
+	}
+	else
+	{
+		sql_cnt = 0;
+		while(sql_cnt < 20)
+		{
+			rc=sqlite3_open(traffic_total_db,&db);
+			if(rc!=SQLITE_OK)
+				printf("Cannot open traffic_total.db!\n");
+
+			rc = sqlite3_exec(db,"delete from traffic_total",NULL,NULL,&errmsg);
+			if(SQLITE_OK == rc)
+			{
+				printf("delete traffic_total.db success!\n");
+				sqlite3_close(db);
+				break;
+			}
+			else
+			{
+				printf("delete traffic_total.db failure!\n");
+				sqlite3_close(db);
+				sleep(1);
+				sql_cnt++;
+			}
+		}
+	
+		sql_cnt = 0;
+		while(sql_cnt < 20)
+		{
+			rc=sqlite3_open(traffic_total_db,&db);
+			if(rc!=SQLITE_OK)
+				printf("Cannot open traffic_total.db!\n");
+
+			rc = sqlite3_exec(db,"vacuum traffic_total",NULL,NULL,&errmsg);
+			if(SQLITE_OK == rc)
+			{
+				printf("vacuum traffic_total.db success!\n");
+				sqlite3_close(db);
+				break;
+			}
+			else
+			{
+				printf("vacuum traffic_total.db failure!\n");
+				sqlite3_close(db);
+				sleep(1);
+				sql_cnt++;
+			}
+		}
+	}
+}
+
+void traffic_saved_check()
+{
+    int traffic_saved_exist = 0;
+	int rc = 0;
+	sqlite3 *db = NULL;
+	char *errmsg = NULL;
+	int sql_cnt = 0;
+
+	if(access(traffic_saved_db, W_OK) == -1)
+	{
+        printf("traffic_saved.db : not exist!\n");
+        sys_log("traffic_saved.db : not exist!");
+        traffic_saved_exist = 0;
+ 	}
+	else
+	{
+		printf("traffic_saved.db : exist!\n");	
+		traffic_saved_exist = 1;
+	}
+
+	if(traffic_saved_exist == 0)
+	{	
+
+		printf("creat traffic_saved.db using traffic.db\n");
+
+		printf("cp -f /ailvgo/system/traffic/traffic.db /ailvgo/system/traffic/traffic_saved.db\n");
+		system("cp -f /ailvgo/system/traffic/traffic.db /ailvgo/system/traffic/traffic_saved.db");
+		sleep(1);
+
+		sql_cnt = 0;
+		while(sql_cnt < 20)
+		{
+			rc=sqlite3_open(traffic_saved_db, &db);
+			if(rc!=SQLITE_OK)
+				printf("Cannot open traffic_saved.db!\n");
+
+			rc = sqlite3_exec(db,"DROP TABLE traffic_info",NULL,NULL,&errmsg);
+			if(SQLITE_OK == rc)
+			{
+				printf("drop table in traffic_saved.db success!\n");
+				sqlite3_close(db);
+				break;
+			}
+			else
+			{
+				printf("drop table in traffic_saved.db failure!\n");
+				sqlite3_close(db);
+				sleep(1);
+				sql_cnt++;
+			}
+		}
+		
+		sql_cnt = 0;
+		while(sql_cnt < 20)
+		{
+			rc=sqlite3_open(traffic_saved_db, &db);
+			if(rc!=SQLITE_OK)
+				printf("Cannot open traffic_saved.db!\n");
+
+			rc = sqlite3_exec(db,"CREATE TABLE traffic_saved (traffic TEXT, time INTEGER)",NULL,NULL,&errmsg);
+			if(SQLITE_OK == rc)
+			{
+				printf("create table in traffic_saved.db success!\n");
+				sqlite3_close(db);
+				break;
+			}
+			else
+			{
+				printf("create table in traffic_saved.db failure!\n");
+				sqlite3_close(db);
+				sleep(1);
+				sql_cnt++;
+			}
+		}
+	}
+	else
+	{
+		sql_cnt = 0;
+		while(sql_cnt < 20)
+		{
+			rc=sqlite3_open(traffic_saved_db, &db);
+			if(rc!=SQLITE_OK)
+				printf("Cannot open traffic_saved.db!\n");
+
+			rc = sqlite3_exec(db,"vacuum traffic_saved",NULL,NULL,&errmsg);
+			if(SQLITE_OK == rc)
+			{
+				printf("vacumm traffic_saved.db success!\n");
+				sqlite3_close(db);
+				break;
+			}
+			else
+			{
+				printf("vacuum traffic_saved.db failure!\n");
+				sqlite3_close(db);
+				sleep(1);
+				sql_cnt++;
+			}
+		}
+	}
+
+}
+
+void traffic_check()
+{
+	sqlite3 *db;
+	int rc = 0;
+	long data = 0, reserve = 0;
+	char *errmsg;
+	sqlite3_stmt *ppstmt = NULL;
+	int sql_cnt = 0;
+	char sql[200] = {0};
+
+    if(access(traffic_db, W_OK) == -1)
+    {
+        printf("traffic.db not exist!\n");
+        sys_log("traffic.db not exist!");
+        exit;
+ 	}
+
+	sql_cnt = 0;
+	while(sql_cnt < 20)
+	{
+		rc=sqlite3_open(traffic_db,&db);
+		if(rc!=SQLITE_OK)
+			printf("open traffic.db failure!\n");
+
+		sqlite3_prepare(db,"select count(*) from traffic_info",-1,&ppstmt,0);
+		rc = sqlite3_step(ppstmt);
+		if(rc==SQLITE_ROW)
+		{
+			data=sqlite3_column_int(ppstmt,0);
+			printf("number in traffic.db : %ld\n",data);
+			sqlite3_finalize(ppstmt);
+			sqlite3_close(db);
+			break;
+		}
+		else
+		{
+			printf("select count(*) in traffic.db failure!\n");
+			sqlite3_finalize(ppstmt);
+			sqlite3_close(db);
+			sleep(1);
+			sql_cnt++;
+		}
+	}
+
+	if(data<BORDER)
+		printf("traffic.db : undelete records!\n");
+	else
+	{
+		printf("traffic.db : record staff mac!\n");
+
+		reserve = data - 500;
+
+		sql_cnt = 0;
+		while(sql_cnt < 20)
+		{
+			rc=sqlite3_open(traffic_db,&db);
+			if(rc!=SQLITE_OK)
+				printf("open traffic.db failure!\n");
+
+			sprintf(sql,"delete from traffic_info where time in (select time from traffic_info order by time asc limit 0, %ld)", reserve);
+			rc = sqlite3_exec(db,sql,NULL,NULL,&errmsg);
+			if(SQLITE_OK==rc)
+			{
+				printf("delete traffic.db success!\n");
+				sqlite3_close(db);
+				break;
+			}
+			else
+			{
+				printf("delete traffic.db failure!\n");
+				sqlite3_close(db);
+				sleep(1);
+				sql_cnt++;
+			}
+		}
+
+		sql_cnt = 0;
+		while(sql_cnt < 20)
+		{
+			rc=sqlite3_open(traffic_db,&db);
+			if(rc!=SQLITE_OK)
+				printf("open traffic.db failure!\n");
+
+			memset(sql,0,sizeof(sql));
+			sprintf(sql,"vacuum traffic_info");
+			rc = sqlite3_exec(db,sql,NULL,NULL,&errmsg);
+			if(SQLITE_OK==rc)
+			{
+				printf("vacuum traffic.db success!\n");
+				sqlite3_close(db);
+				break;
+			}
+			else
+			{
+				printf("vacuum traffic.db failure!\n");
+				sqlite3_close(db);
+				sleep(1);
+				sql_cnt++;
+			}
+		}
+	}
+}
+

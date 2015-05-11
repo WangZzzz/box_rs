@@ -1,6 +1,6 @@
 /******************************
  *Filname : control.c
- *Date : 2015-03-05
+ *Date : 2015-05-09
  * *****************************/
 
 
@@ -23,10 +23,14 @@
 # define mydns "/ailvgo/system/domain/mydns &"
 # define sys_daemon "/ailvgo/system/box/sys_daemon &"
 # define load_daemon "/ailvgo/system/box/load_daemon &"
+# define box_conf_change "/ailvgo/system/box/box_conf_change &"
+# define box_conf_report "/ailvgo/system/box/box_conf_report &"
 # define box_login "/ailvgo/system/box/box_login &"
+# define sysfile_manage "/ailvgo/system/box/sysfile_manage &"
 # define app_update "/ailvgo/system/box/app_update &"
 # define file_manage "/ailvgo/system/box/file_manage &"
 # define file_upload "/ailvgo/system/box/file_upload &"
+# define udp_upload "/ailvgo/system/traffic/udp_upload &"
 
 # define logfile "/ailvgo/system/log/sys_log"
 
@@ -40,7 +44,7 @@ void sys_log(char *str)
 	time(&boxtime);
 	timeinfo = localtime(&boxtime);
 
-	fp = fopen(logfile, "a");
+	fp = fopen(logfile,"a");
 	sprintf(content, "%s ----- %s\n", asctime(timeinfo), str);
 	fputs(content,fp);
 	fclose(fp);
@@ -50,6 +54,29 @@ void bail(char *s)
 {
         fputs(s, stderr);
         fputc('\n', stderr);
+}
+
+int ailvgobox_monitor()
+{
+	FILE *stream;
+	char buf_ailvgobox[1024] = {0};
+	int ailvgobox_break = 1;
+	
+	memset(buf_ailvgobox, 0, sizeof(buf_ailvgobox));
+	
+	printf("ping -c 1 www.ailvgobox.com\n");
+    	stream = popen("ping -c 1 www.ailvgobox.com", "r");
+	fread(buf_ailvgobox, sizeof(char), sizeof(buf_ailvgobox), stream);
+	buf_ailvgobox[1023] = '\0';
+    	pclose(stream);
+	printf("buf_ailvgobox : %s\n", buf_ailvgobox);
+	if(strstr(buf_ailvgobox, "1 received"))
+		ailvgobox_break = 0;
+
+	if(ailvgobox_break == 1)
+		return 1;
+	else
+		return 0;
 }
 
 int main()
@@ -62,344 +89,544 @@ int main()
 	char *errorMsg = NULL;
 	FILE *stream = NULL;
 	char buf[1024] = {0};
-    char buf_wifi[1024] = {0};
 	int cnt = 0, idx = 0;
-	const char *box_id = NULL, *wan_state = NULL, *wan_driver=NULL;
-    const char *filename = NULL, *filepath = NULL;
+	const char *wan_state = NULL, *wan_driver=NULL;
+	char wan_driver_tmp[5] = {0};
+	int db_cnt;
       
     printf("**********************************\n");
 	printf("control : start\n");
-    printf("**********************************\n");
-        
-	/*************************************************/
+   	printf("**********************************\n");
 
-        //sysfile update
-        printf("-------------------------------\n");
-        printf("sysfile update\n");
-        printf("file.db : check sysfile...\n");
+	// set wan_state=0 in box.db
+    printf("\n-------------------------------\n");
+	printf("box.db : check & set wan_state = 0\n");
 
-        rc=sqlite3_open(file_db, &db);
-        if(rc == SQLITE_ERROR)
-        {
-                bail("open file.db failed");
-        }
-        ppstmt=NULL;
-        memset(sql_cmd, 0, sizeof(sql_cmd));
-        strcpy(sql_cmd, "select filename, filepath from file_info;");
-        printf("sql_cmd : %s\n", sql_cmd);
-        sqlite3_prepare(db, sql_cmd, -1, &ppstmt, 0);
-        while(sqlite3_step(ppstmt) == SQLITE_ROW)
-        {
-                filename=sqlite3_column_text(ppstmt, 0);
-                printf("file_name : %s\n", filename);
-                filepath=sqlite3_column_text(ppstmt, 1);
-                printf("box_folder : %s\n", filepath);
+	db_cnt = 0;
+	while(db_cnt < 20)    
+	{
+		rc = sqlite3_open(box_db, &db);
+    	if(rc == SQLITE_ERROR)
+			bail("open box.db failed");
 
-                printf("make temp folder...\n");
-                system("mkdir -p /ailvgo/temp/temp/");
-                sleep(1);
-                printf("unzip file in temp folder...\n");
-                memset(sh_cmd, 0, sizeof(sh_cmd));
-                sprintf(sh_cmd, "unzip -o /ailvgo/www/temp/%s -d /ailvgo/www/temp/temp/", filename);
-                printf("sh_cmd : %s\n", sh_cmd);
-                system(sh_cmd);
-                sleep(10);
-                printf("cp files to destination path...\n");
-                memset(sh_cmd, 0, sizeof(sh_cmd));
-                sprintf(sh_cmd, "cp -rf /ailvgo/temp/temp/* %s", filepath);
-                printf("sh_cmd : %s\n", sh_cmd);
-                system(sh_cmd);
-                sleep(10);
-                printf("remove temp folder...\n");
-                system("rm -rf /ailvgo/www/temp/temp/");
-                sleep(10);
-                printf("delete zipfile...\n");
-                memset(sh_cmd, 0, sizeof(sh_cmd));
-                sprintf(sh_cmd, "rm -f /ailvgo/www/temp/%s", filename);
-                printf("sh_cmd : %s\n", sh_cmd);
-                system(sh_cmd);
-                sleep(2);
-                printf("sysfile update complete!\n");
-        }
-        
-        printf("delete all files in file.db!\n");
-        memset(sql_cmd, 0, sizeof(sql_cmd)); 
-        strcpy(sql_cmd, "delete from file_info;");
-        printf("sql_cmd : %s\n", sql_cmd);
-        sqlite3_exec(db, sql_cmd, NULL, NULL, &errorMsg);
-        sqlite3_finalize(ppstmt);
-        sqlite3_close(db);
-        
-        sleep(1);
+		strcpy(sql_cmd, "update box_info set wan_state=\"0\"");
+		if(sqlite3_exec(db, sql_cmd, NULL, NULL, &errorMsg)!=SQLITE_OK)
+		{
+			printf("errorMsg : %s\n", errorMsg);
+			sqlite3_close(db);
+			sleep(1);
+			db_cnt++;
+		}
+		else
+		{
+			printf("wan_state = 0!\n");
+    		sqlite3_close(db);
+			break;
+		}
+	}
+	
+    // wan_start
+	printf("\n-------------------------------\n");
+    printf("wan_start : start\n");
 
-	//set wan_state=0
-        printf("\n");
-        printf("-------------------------------\n");
-        printf("box.db : set wan_state = 0\n");
+	system(wan_start);
+    sleep(20);
+	
+    //mydns run
+	printf("\n-------------------------------\n");
+    printf("mydns : start \n");
 
-        rc = sqlite3_open(box_db, &db);
-        memset(sql_cmd, 0, sizeof(sql_cmd));
-        strcpy(sql_cmd, "update box_info set wan_state=\"0\"");
-        if(rc == SQLITE_ERROR)
-        {       
-                bail("open box.db failed");
-        }
-        if(sqlite3_exec(db, sql_cmd, NULL, NULL, &errorMsg) != SQLITE_OK)
-                printf("errorMsg_control : %s\n", errorMsg);
-        else
-                printf("set wan_state = 0 ok!\n");
-        sqlite3_close(db);
-
-	    sleep(1);
-	    
-        // wan_start
-        printf("\n");
-	    printf("-------------------------------\n");
-        printf("wan_start : start\n");
-
-        system(wan_start);
-        sleep(20);
-        
-
-        //mydns or dnsmasq run
-        if(access("/ailvgo/system/domain/mydns", W_OK) == 0)
-        {
-        	//my_dns run
-        	printf("\n");
-		    printf("-------------------------------\n");
-        	printf("mydns : start \n");
-
-        	system(mydns);
-        	sleep(1);
- 	    }
-        else
-        {
-        	//dnsmasq run
-        	printf("\n");
-		    printf("-------------------------------\n");
-        	printf("dnsmasq : start \n");
-
-        	system("service dnsmasq restart");
-        	sleep(1);
-        }
-       
-	//sys_daemon start
-	    printf("\n");
-	    printf("-------------------------------\n");
-        printf("sys_daemon : start\n");
-
-        system(sys_daemon);
-        sleep(1);
+    stream = NULL;
+	if((stream = popen("ps -ef | grep 'mydns' | grep -v 'grep' | grep -v 'sh -c' | awk '{print $2}' | wc -l", "r")) == NULL)
+		printf("popen failed\n");
+    memset(buf, 0, sizeof(buf));
+    fread(buf, sizeof(char), sizeof(buf), stream);
+    buf[1023] = '\0';
+    sscanf(buf, "%d", &cnt);
+    pclose(stream);
+    printf("mydns process : %d\n", cnt);
+    if(cnt >= 1)
+		printf("mydns : running!\n");
+    else
+    {
+		system(mydns);
+    	sleep(1);
+	}
 
 	//load_daemon start
-	    printf("\n");
-	    printf("-------------------------------\n");
-        printf("load_daemon : start\n");
+    printf("\n-------------------------------\n");
+    printf("load_daemon : start\n");
 
-        system(load_daemon);
-        sleep(1);
+    stream = NULL;
+	if((stream = popen("ps -ef | grep 'load_daemon' | grep -v 'grep' | grep -v 'sh -c' | awk '{print $2}' | wc -l", "r")) == NULL)
+		printf("popen failed\n");
+    memset(buf, 0, sizeof(buf));
+    fread(buf, sizeof(char), sizeof(buf), stream);
+    buf[1023] = '\0';
+    sscanf(buf, "%d", &cnt);
+    pclose(stream);
+    printf("load_daemon process : %d\n", cnt);
+    if(cnt >= 1)
+		printf("load_daemon : running!\n");
+    else
+    {
+		system(load_daemon);
+    		sleep(1);
+	}
 	
-        /*************************************************************/
+	//sys_daemon start
+	printf("\n-------------------------------\n");
+    printf("sys_daemon : start\n");
+
+    stream = NULL;
+	if((stream = popen("ps -ef | grep 'sys_daemon' | grep -v 'grep' | grep -v 'sh -c' | awk '{print $2}' | wc -l", "r")) == NULL)
+		printf("popen failed\n");
+    memset(buf, 0, sizeof(buf));
+    fread(buf, sizeof(char), sizeof(buf), stream);
+    buf[1023] = '\0';
+    sscanf(buf, "%d", &cnt);
+    pclose(stream);
+    printf("sys_daemon process : %d\n", cnt);
+    if(cnt >= 1)
+		printf("sys_daemon : running!\n");
+    else
+    {
+		system(sys_daemon);
+    	sleep(1);
+	}
+
+    /*************************************************************/
 
 	// check wan_driver
-        printf("\n");
-        printf("-------------------------------\n");
-        printf("box.db : check wan_driver\n");
+    printf("\n-------------------------------\n");
+    printf("box.db : check wan_driver\n");
 
-	    ppstmt=NULL;
-        memset(sql_cmd, 0, sizeof(sql_cmd));
-        strcpy(sql_cmd, "select wan_driver from  box_info");
-        rc = sqlite3_open(box_db, &db);
-        if(rc == SQLITE_ERROR)
-        {       
-                bail("open box.db failed");
-        }
-        sqlite3_prepare(db, sql_cmd, -1, &ppstmt, 0);
-        rc = sqlite3_step(ppstmt);
-        if(rc == SQLITE_ROW)
-        {  
-              wan_driver=sqlite3_column_text(ppstmt, 0);
-              printf("wan_driver : %s\n", wan_driver);
-        }
-        if(strcmp(wan_driver, "0") == 0)
-        {
-              sqlite3_finalize(ppstmt);
-              sqlite3_close(db);
-              printf("no wan needed, control finish!\n"); 
-              exit(1);
-        }
-	    sqlite3_finalize(ppstmt);	
-	    sqlite3_close(db);
-        
+	ppstmt=NULL;
+    memset(sql_cmd, 0, sizeof(sql_cmd));
+    strcpy(sql_cmd, "select wan_driver from  box_info");
+
+	db_cnt = 0;
+	while(db_cnt < 20)
+	{
+    	rc = sqlite3_open(box_db, &db);
+    	if(rc == SQLITE_ERROR)
+			bail("open box.db failed");
+
+  		sqlite3_prepare(db, sql_cmd, -1, &ppstmt, 0);
+    	rc = sqlite3_step(ppstmt);
+    	if(rc == SQLITE_ROW)
+    	{  
+        	wan_driver=sqlite3_column_text(ppstmt, 0);
+			strcpy(wan_driver_tmp, wan_driver);
+			printf("wan_driver : %s\n", wan_driver_tmp);
+        	sqlite3_finalize(ppstmt);
+        	sqlite3_close(db);
+			break;
+    	}
+		else
+		{
+			printf("select wan_driver failure!\n");
+        	sqlite3_finalize(ppstmt);
+        	sqlite3_close(db);
+			sleep(1);
+			db_cnt++;
+		}
+	}
+
+    if(strcmp(wan_driver_tmp, "0") == 0)
+    {
+        printf("no wan needed, control finish!\n"); 
+        exit(1);
+    }
          	
-       	// network_monitor_run start
-        printf("/n");
-	    printf("-------------------------------\n");
-        printf("network_monitor_run : start\n");
+    // network_monitor_run start
+	printf("\n-------------------------------\n");
+    printf("network_monitor_run : start\n");
 	
-	    system(network_monitor_run);
-        sleep(1);
+    stream = NULL;
+	if((stream = popen("ps -ef | grep 'network_monitor' | grep -v 'grep' | grep -v 'sh -c' | awk '{print $2}' | wc -l", "r")) == NULL)
+		printf("popen failed\n");
+    memset(buf, 0, sizeof(buf));
+    fread(buf, sizeof(char), sizeof(buf), stream);
+    buf[1023] = '\0';
+    sscanf(buf, "%d", &cnt);
+    pclose(stream);
+    printf("network_monitor_run process : %d\n", cnt);
+    if(cnt >= 1)
+		printf("network_monitor_run : running!\n");
+    else
+    {
+		system(network_monitor_run);
+    	sleep(1);
+	}
         
-    	/************************************************************/
+    /************************************************************/
        
-       	//check wan_state
-    printf("\n");
-    printf("-------------------------------\n");
+    //check wan_state
+   	printf("\n-------------------------------\n");
     printf("box.db: check wan_state\n");
 
     printf("start wan_state check...\n");
 	while(1)
 	{
-		sleep(15);
+		sleep(10);
 		
 		rc = sqlite3_open(box_db, &db);
         if(rc == SQLITE_ERROR)
-       	{
-             bail("open database failed");
-        }
+            bail("open database failed");
 		
 		ppstmt = NULL;
 		memset(sql_cmd, 0, sizeof(sql_cmd));
-		strcpy(sql_cmd, "select box_id, wan_state from box_info");
-        sqlite3_prepare(db, sql_cmd, -1, &ppstmt, 0);
-       	rc = sqlite3_step(ppstmt);
-        if(rc == SQLITE_ROW)
-        {
-                box_id = sqlite3_column_text(ppstmt, 0);
-                printf("box_id : %s | ", box_id);
-                wan_state = sqlite3_column_text(ppstmt, 1);
-				printf("wan_state : %s\n", wan_state);
-                if(strcmp(wan_state, "1") == 0)
-                {	
-                       printf("wan connected!!\n");
-					   sqlite3_finalize(ppstmt);
-                       sqlite3_close(db);
-                       break;
-                }
-        }
+		strcpy(sql_cmd, "select wan_state from box_info");
+		sqlite3_prepare(db, sql_cmd, -1, &ppstmt, 0);
+		rc = sqlite3_step(ppstmt);
+		if(rc == SQLITE_ROW)
+		{
+			wan_state = sqlite3_column_text(ppstmt, 0);
+			printf("wan_state : %s\n", wan_state);
+			if(strcmp(wan_state, "1") == 0)
+			{	
+				printf("wan connected!!\n");
+				sqlite3_finalize(ppstmt);
+				sqlite3_close(db);
+				break;
+			}
+		}
 		sqlite3_finalize(ppstmt);	
 		sqlite3_close(db);	
 	}
         
-        printf("Network connected!\n");
+    printf("Network : connected!\n");
+   
+    //check ailvgobox server online & offline
+    printf("\n-------------------------------\n");
+    printf("ailvgobox : check online \n");
+
+	int ailvgobox_break = 1;
+
+    printf("start ailvgobox check...\n");
+	
+	for(idx = 0; idx < 10; ++idx)
+	{
+		if(ailvgobox_monitor() == 1)
+		{
+			printf("ailvgobox server : offline!\n");
+			sys_log("ailvgobox : offline");
+			ailvgobox_break = 1;
+			sleep(20);
+		}
+		else
+		{
+			printf("ailvgobox server : online!\n");
+			ailvgobox_break = 0;
+			break;
+		}
+	}
+
+	if(ailvgobox_break == 1)
+	{
+		printf("ailvgobox : offline, try again every 20 mins\n");
+	
+		printf("network connected & ailvgobox offline, set iptables by default!\n");
+		
+		switch(atoi(wan_driver_tmp))
+		{
+			case 10 :
+			{
+				printf("iptables -t nat -A POSTROUTING -o wlan0 -s 192.168.100.0/24 -j MASQUERADE\n");
+				system("iptables -t nat -A POSTROUTING -o wlan0 -s 192.168.100.0/24 -j MASQUERADE");
+				break;
+			}
+			case 20 :
+			{
+				printf("iptables -t nat -A POSTROUTING -o eth1 -s 192.168.100.0/24 -j MASQUERADE\n");
+				system("iptables -t nat -A POSTROUTING -o eth1 -s 192.168.100.0/24 -j MASQUERADE");
+				break;
+			}
+			default :
+			{
+				printf("iptables -t nat -A POSTROUTING -o ppp0 -s 192.168.100.0/24 -j MASQUERADE\n");
+				system("iptables -t nat -A POSTROUTING -o ppp0 -s 192.168.100.0/24 -j MASQUERADE");
+				break;
+			}
+		}
+
+		while(1)
+		{
+			sleep(1200);
+			if(ailvgobox_monitor() == 1)
+			{
+				printf("ailvgobox server : offline!\n");
+				sys_log("ailvgobox : offline");
+			}
+			else
+			{
+			  printf("ailvgobox server : online!\n");
+			  break;
+			}
+		}
+	}
+
+    //box_conf_change
+	printf("\n-------------------------------\n");
+    printf("box_conf_change : start\n");
+    
+	system(box_conf_change);
+
+	for(idx = 0; idx < 6; ++idx)
+    {
+		sleep(10);
         
-        //box_login
-	printf("\n");
-	printf("-------------------------------\n");
-        printf("box_login: start");
+		stream = NULL;
+		if((stream = popen("ps -ef | grep 'box_conf' | grep -v 'grep' | grep -v 'sh -c' | awk '{print $2}' | wc -l", "r")) == NULL)
+			printf("popen failed\n");
+        memset(buf, 0, sizeof(buf));
+        fread(buf, sizeof(char), sizeof(buf), stream);
+        buf[1023] = '\0';
+        sscanf(buf, "%d", &cnt);
+        pclose(stream);
+        printf("box_conf_change process : %d\n", cnt);
+        
+		if(cnt >= 1)
+            continue;
+        else
+            break;
+    }
 
-	system(box_login);
-	sleep(20);
+	if(idx == 6)
+    {
+        printf("killall box_conf_change\n");
+		system("killall box_conf_change");
+    }
 
-        //file_manage
-        printf("\n");
-        printf("-------------------------------\n");
-        printf("file_manage : start\n");
+    //box_conf_report start
+	printf("\n-------------------------------\n");
+    printf("box_conf_report : start\n");
+    
+	system(box_conf_report);
+	
+	for(idx = 0; idx < 6; ++idx)
+    {
+		sleep(10);
+        
+		stream = NULL;
+		if((stream = popen("ps -ef | grep 'box_conf' | grep -v 'grep' | grep -v 'sh -c' | awk '{print $2}' | wc -l", "r")) == NULL)
+			printf("popen failed\n");
+        memset(buf, 0, sizeof(buf));
+        fread(buf, sizeof(char), sizeof(buf), stream);
+        buf[1023] = '\0';
+        sscanf(buf, "%d", &cnt);
+        pclose(stream);
+        printf("box_conf_report process : %d\n", cnt);
+        
+		if(cnt >= 1)
+            continue;
+        else
+            break;
+    }
 
-	system(file_manage);
+	if(idx == 6)
+    {
+        printf("killall box_conf_report\n");
+		system("killall box_conf_report");
+    }
+
+    //box_login
+	printf("\n-------------------------------\n");
+    printf("box_login: start\n");
+
+	stream = NULL;
+	if((stream = popen("ps -ef | grep 'box_login' | grep -v 'grep' | grep -v 'sh -c' | awk '{print $2}' | wc -l", "r")) == NULL)
+		printf("popen failed\n");
+    memset(buf, 0, sizeof(buf));
+    fread(buf, sizeof(char), sizeof(buf), stream);
+    buf[1023] = '\0';
+    sscanf(buf, "%d", &cnt);
+    pclose(stream);
+    printf("box_login process : %d\n", cnt);
+        
+    if(cnt >= 1)
+		printf("box_login : running!\n");
+    else
+    {
+		system(box_login);
+    	sleep(20);
+	}
+
+	//sysfile_manage
+	printf("\n--------------------------------\n");
+	printf("sysfile_manage : start\n");
+
+	system(sysfile_manage);
+
 	for(idx = 0; idx < MAXRUNTIME; ++idx)
-        {
-                sleep(15);
-                stream = NULL;
-		if((stream = popen("ps -ef | grep 'file_manage' | grep -v 'grep' | grep -v 'sh -c' | awk '{print $2}' | wc -l", "r")) == NULL)
-                        printf("popen failed\n");
-                memset(buf, 0, sizeof(buf));
-                fread(buf, sizeof(char), sizeof(buf), stream);
-                buf[1023] = '\0';
-                sscanf(buf, "%d", &cnt);
-                pclose(stream);
-                printf("file_manage process : %d\n", cnt);
-                if(cnt >= 1)
-                {
-                        cnt = 0;
-                        continue;
-                }
-                else
-                        break;
-        }
-	if(idx == MAXRUNTIME)
-        {
-              printf("killall file_manage\n");
-              system("killall file_manage");
-              sleep(5);
-              printf("killall curl\n");
-              system("killall curl");
-        }
+    {
+		sleep(10);
         
-        //app_update
-	printf("\n");
-        printf("-------------------------------\n");
-        printf("app_update : start\n");
+		stream = NULL;
+		if((stream = popen("ps -ef | grep 'sysfile_manage' | grep -v 'grep' | grep -v 'sh -c' | awk '{print $2}' | wc -l", "r")) == NULL)
+			printf("popen failed\n");
+        memset(buf, 0, sizeof(buf));
+        fread(buf, sizeof(char), sizeof(buf), stream);
+        buf[1023] = '\0';
+        sscanf(buf, "%d", &cnt);
+        pclose(stream);
+        printf("sysfile_manage process : %d\n", cnt);
+        
+		if(cnt >= 1)
+            continue;
+        else
+            break;
+    }
+	
+	if(idx == MAXRUNTIME)
+    {
+        printf("killall sysfile_manage\n");
+		system("killall sysfile_manage");
+        sleep(1);
+        printf("killall curl\n");
+        system("killall curl");
+    }
 
-        system(app_update);
-        for(idx = 0; idx < MAXRUNTIME; ++idx)
-        {
-                sleep(15);
-                stream = NULL;
+    //app_update
+    printf("\n-------------------------------\n");
+    printf("app_update : start\n");
+
+    system(app_update);
+
+    for(idx = 0; idx < MAXRUNTIME; ++idx)
+    {
+        sleep(15);
+
+        stream = NULL;
 		if((stream = popen("ps -ef | grep 'app_update' | grep -v 'grep' | grep -v 'sh -c' | awk '{print $2}' | wc -l", "r")) == NULL)
 			printf("popen failed\n");
-                memset(buf, 0, sizeof(buf));
-                fread(buf, sizeof(char), sizeof(buf), stream);
-                buf[1023] = '\0';
-                sscanf(buf, "%d", &cnt);
-                pclose(stream);
-                printf("app_update process : %d\n", cnt);
-                if(cnt >= 1)
-                {
-                        cnt = 0;
-                        continue;
-                }
-                else
-                        break;
-        }
-	if(idx == MAXRUNTIME)
-        {
-               printf("killall app_update\n");
-               system("killall app_update");
-               sleep(5);
-               printf("killall curl\n");
-               system("killall curl");
-        }
+        memset(buf, 0, sizeof(buf));
+		fread(buf, sizeof(char), sizeof(buf), stream);
+        buf[1023] = '\0';
+        sscanf(buf, "%d", &cnt);
+        pclose(stream);
+        printf("app_update process : %d\n", cnt);
         
-        //file_upload
-        printf("\n");
-        printf("-------------------------------\n");
-        printf("file_upload : start\n");
+		if(cnt >= 1)
+            continue;
+        else
+            break;
+    }
+	
+	if(idx == MAXRUNTIME)
+    {
+        printf("killall app_update\n");
+        system("killall app_update");
+        sleep(1);
+        printf("killall curl\n");
+        system("killall curl");
+    }
+        
+    //file_manage
+    printf("\n-------------------------------\n");
+    printf("file_manage : start\n");
 
-        system(file_upload);
-        for(idx = 0; idx < MAXRUNTIME; ++idx)
-        {
-                sleep(15);
-                stream = NULL;
+	system(file_manage);
+	
+	for(idx = 0; idx < MAXRUNTIME; ++idx)
+    {
+        sleep(15);
+        stream = NULL;
+		if((stream = popen("ps -ef | grep 'file_manage' | grep -v 'grep' | grep -v 'sh -c' | awk '{print $2}' | wc -l", "r")) == NULL)
+			printf("popen failed\n");
+        memset(buf, 0, sizeof(buf));
+		fread(buf, sizeof(char), sizeof(buf), stream);
+       	buf[1023] = '\0';
+        sscanf(buf, "%d", &cnt);
+        pclose(stream);
+        printf("file_manage process : %d\n", cnt);
+       
+	 	if(cnt >= 1)
+            continue;
+        else
+            break;
+    }
+	
+	if(idx == MAXRUNTIME)
+    {
+		printf("killall file_manage\n");
+        system("killall file_manage");
+        sleep(1);
+        printf("killall curl\n");
+        system("killall curl");
+    }
+        
+    //file_upload
+    printf("\n-------------------------------\n");
+    printf("file_upload : start\n");
+
+    system(file_upload);
+    
+	for(idx = 0; idx < MAXRUNTIME; ++idx)
+    {
+		sleep(15);
+        stream = NULL;
 		if((stream = popen("ps -ef | grep 'file_upload' | grep -v 'grep' | grep -v 'sh -c' | awk '{print $2}' | wc -l", "r")) == NULL)
-                        printf("popen failed\n");
-                memset(buf, 0, sizeof(buf));
-                fread(buf, sizeof(char), sizeof(buf), stream);
-                buf[1023] = '\0';
-                sscanf(buf, "%d", &cnt);
-                pclose(stream);
-                printf("file_upload process : %d\n", cnt);
-                if(cnt >= 1)
-                {
-                        cnt = 0;
-                        continue;
-                }
-                else
-                        break;
-        }
-	if(idx == MAXRUNTIME)
-        {
-                printf("killall file_upload\n");
-                system("killall file_upload");
-                sleep(5);
-                printf("killall curl\n");
-                system("killall curl");
-        }
+			printf("popen failed\n");
+        memset(buf, 0, sizeof(buf));
+        fread(buf, sizeof(char), sizeof(buf), stream);
+        buf[1023] = '\0';
+        sscanf(buf, "%d", &cnt);
+        pclose(stream);
+        printf("file_upload process : %d\n", cnt);
         
-        printf("\n");
-        printf("**********************************\n");
-        printf("control finish\n");
-        printf("**********************************\n");
+		if(cnt >= 1)
+            continue;
+        else
+            break;
+    }
+	
+	if(idx == MAXRUNTIME)
+    {
+		printf("killall file_upload\n");
+        system("killall file_upload");
+        sleep(1);
+        printf("killall curl\n");
+        system("killall curl");
+    }
+        
+    //udp_upload
+    printf("\n-------------------------------\n");
+    printf("udp_upload : start\n");
 
-	return 0;
+    system(udp_upload);
+
+    for(idx = 0; idx < MAXRUNTIME; ++idx)
+   	{
+		sleep(15);
+        stream = NULL;
+		if((stream = popen("ps -ef | grep 'udp_upload' | grep -v 'grep' | grep -v 'sh -c' | awk '{print $2}' | wc -l", "r")) == NULL)
+			printf("popen failed\n");
+        memset(buf, 0, sizeof(buf));
+        fread(buf, sizeof(char), sizeof(buf), stream);
+        buf[1023] = '\0';
+        sscanf(buf, "%d", &cnt);
+        pclose(stream);
+        printf("udp_upload process : %d\n", cnt);
+        
+		if(cnt >= 1)
+            continue;
+        else
+            break;
+    }
+	
+	if(idx == MAXRUNTIME)
+    {
+		printf("killall udp_upload\n");
+        system("killall udp_upload");
+        sleep(1);
+        printf("killall curl\n");
+        system("killall curl");
+    }
+        
+    printf("\n**********************************\n");
+    printf("control : complete!\n");
+	printf("**********************************\n");
+
 }

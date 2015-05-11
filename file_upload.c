@@ -150,7 +150,7 @@ upload_file(const char *filename, const char *type, sqlite3 *db)
 	else
 	{
 		md5_value = md5_file(filename_all);
-		sprintf(request_url, "http://www.ailvgobox.com/box_manage/file_query.php?file_name=%s&folder=%s", filename_query, uploadfile_folder);
+		sprintf(request_url, "http://www.ailvgobox.com/box_manage_2/file_query_1.php?file_name=%s&folder=%s", filename_query, uploadfile_folder);
         	printf("request_url : %s\n", request_url);
         	req_upload = ghttp_request_new();
         	strcpy(http_body, send_http_request(req_upload, request_url));

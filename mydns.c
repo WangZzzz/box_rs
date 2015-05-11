@@ -25,10 +25,12 @@
 #define MAX_SIZE 1024
 #define CACHE_SIZE 256
 
-#define CACHE_ON 0
+#define CACHE_ON 0 
 
 # define logfile "/ailvgo/system/sys_log"
 # define resolvfile "/etc/resolv.conf"
+
+int get_control();
 
 void sys_log(char *str)
 {
@@ -57,6 +59,18 @@ int main()
 	char nameserver[100];
 	char dns_ip[50] = {0};
 	
+	int control = 0;
+
+	//check enable value in domain.db
+	printf("check enable value in domain_control | domain.db \n");
+	control = get_control();
+	if(control==0)
+	{
+		printf("enable : off, all url allowed! \n");
+	}
+	else
+	  printf("enable : on, all url checked!\n");
+
 	// get the dns_ip from resolv.conf
     if((fp = fopen(resolvfile, "r")) == NULL)
     {
@@ -175,15 +189,15 @@ int main()
 
 	// init dns client
 	if((sockfd_client = socket(AF_INET,SOCK_DGRAM,0))<0)
-        {
+    {
 		perror("socket_client");
 		return 0;
 	}
-        printf("init udp client success!\n");
+    printf("init udp client success!\n");
         
-        setsockopt(sockfd_client,SOL_SOCKET,SO_RCVTIMEO,&tv_out, sizeof(tv_out));
+	setsockopt(sockfd_client,SOL_SOCKET,SO_RCVTIMEO,&tv_out, sizeof(tv_out));
 
-        setsockopt(sockfd_server,SOL_SOCKET,SO_RCVTIMEO,&tv_out, sizeof(tv_out));
+    setsockopt(sockfd_server,SOL_SOCKET,SO_RCVTIMEO,&tv_out, sizeof(tv_out));
 	
 	sin_size=sizeof(struct sockaddr_in);
 
@@ -203,11 +217,11 @@ int main()
 		j=0;
 
 		for(i=0;i<6;i++)
-        	{
+		{
 			tmp=buffer_server_rec[cnt];
 			k = cnt+tmp;
 			if(tmp!=0)
-                	{
+			{
 				for(cnt = cnt + 1;cnt <= k;)
 				{
 					url[j]=buffer_server_rec[cnt];
@@ -217,9 +231,9 @@ int main()
 				url[j]='.';
 				j++;
 			}
-        		else
-				break;
-        	}
+        	else
+			  break;
+		}
 		j--;
 		url[j]='\0';
         
@@ -230,7 +244,11 @@ int main()
 		printf("url : %s\n",url);
 
 		//check url in allow_url
-		if((strcmp(url, "www.ailvgoserver.com") == 0) || (strcmp(url, "app.ailvgo.com") == 0))
+		if(control==0)
+		{
+			flag = 1;
+		}
+		else if((strcmp(url, "www.ailvgoserver.com") == 0) || (strcmp(url, "app.ailvgo.com") == 0))
 			flag = 2;
         else
 		{
@@ -284,7 +302,6 @@ int main()
 		switch(flag)
 		{
 			case 1 :
-			{
 				printf("url : allow!\n");
 			
 				if(CACHE_ON)
@@ -324,7 +341,7 @@ int main()
 						printf("dns : forward cache response success!\n");
 						continue;
 					}
-
+			
 					printf("url not found in cache\n");
 				}
 
@@ -332,22 +349,22 @@ int main()
 				while(tmp1<len_server_rec)
 				{
 					if((tmp1+=sendto(sockfd_client,buffer_server_rec+tmp1,(len_server_rec-tmp1),0,(struct sockaddr *)&addr_client_send,sin_size))< 0)
-                    {
-                       	perror("forward request to upsream dns");
-                       	printf("forward request timeout!!!\n");
+					{
+						perror("forward request to upsream dns");
+						printf("forward request timeout!!!\n");
 						goto timeout_flag;
-                    }
+					}		
 				}
-                printf("dns : forward request success!\n");
-
-                memset(cache_response[m],0,sizeof(cache_response[m]));
+				printf("dns : forward request success!\n");
+            
+				memset(cache_response[m],0,sizeof(cache_response[m]));
 				if((len_client_rec=recvfrom(sockfd_client,&(cache_response[m][0]),MAX_SIZE,0,NULL,NULL))<0)
 				{
 					perror("receive response from dns");
-                    printf("receive response timeout!!!\n");
+				    printf("receive response timeout!!!\n");
 					goto timeout_flag;
 				}
-                printf("dns : receive response success!\n");
+				printf("dns : receive response success!\n");
 			
 				strcpy(cache_url[m], url);
 				cache_len[m]=len_client_rec;
@@ -356,98 +373,129 @@ int main()
 				tmp1 = 0;
 				while(tmp1<len_client_rec)
 				{
-                	if((tmp1+=sendto(sockfd_server,&(cache_response[m][tmp1]),(len_client_rec-tmp1),0,(struct sockaddr *)&addr_server_send,sin_size))< 0)
+					if((tmp1+=sendto(sockfd_server,&(cache_response[m][tmp1]),(len_client_rec-tmp1),0,(struct sockaddr *)&addr_server_send,sin_size))< 0)
 					{
 						perror("forward response to terminal");
-                        printf("forward response timeout!!!\n");
-			        	goto timeout_flag;
-					}
-		    	}
-                printf("dns : forward response success!\n");
+						printf("forward response timeout!!!\n");
+						goto timeout_flag;
+					}	
+				}
+				printf("dns : forward response success!\n");
 			
 				m++;
 				if(m==CACHE_SIZE)
 					m = 0;
 				break;
-            }
-			case 0 :
-			{
+		
+
+			case 0:
 				printf("url : deny!\n");
 			
 				timeout_flag:
-                    	
-		    	buffer_server_rec[2]='\x81';
-                buffer_server_rec[3]='\x80';
-                buffer_server_rec[7]='\x01';
-                buffer_server_rec[len_server_rec++]='\xc0';
-            	buffer_server_rec[len_server_rec++]='\x0c';
-           	    buffer_server_rec[len_server_rec++]='\x00';
-           	    buffer_server_rec[len_server_rec++]='\x01';
-           	    buffer_server_rec[len_server_rec++]='\x00';
-           	    buffer_server_rec[len_server_rec++]='\x01';
-           	    buffer_server_rec[len_server_rec++]='\x00';
-          	    buffer_server_rec[len_server_rec++]='\x00';
-           	    buffer_server_rec[len_server_rec++]='\x00';
-           	    buffer_server_rec[len_server_rec++]='\xa0';
-          	    buffer_server_rec[len_server_rec++]='\x00';
-           	    buffer_server_rec[len_server_rec++]='\x04';
-           	    buffer_server_rec[len_server_rec++]='\xc0';
-             	buffer_server_rec[len_server_rec++]='\xa8';
-           	    buffer_server_rec[len_server_rec++]='\x64';
-           	    buffer_server_rec[len_server_rec++]='\x01';
-           	    buffer_server_rec[len_server_rec]='\0';
+			            	
+				buffer_server_rec[2]='\x81';
+			    buffer_server_rec[3]='\x80';
+			    buffer_server_rec[7]='\x01';
+				buffer_server_rec[len_server_rec++]='\xc0';
+				buffer_server_rec[len_server_rec++]='\x0c';
+				buffer_server_rec[len_server_rec++]='\x00';
+				buffer_server_rec[len_server_rec++]='\x01';
+				buffer_server_rec[len_server_rec++]='\x00';
+				buffer_server_rec[len_server_rec++]='\x01';
+				buffer_server_rec[len_server_rec++]='\x00';
+				buffer_server_rec[len_server_rec++]='\x00';
+				buffer_server_rec[len_server_rec++]='\x00';
+				buffer_server_rec[len_server_rec++]='\xa0';
+				buffer_server_rec[len_server_rec++]='\x00';
+				buffer_server_rec[len_server_rec++]='\x04';
+				buffer_server_rec[len_server_rec++]='\xc0';
+				buffer_server_rec[len_server_rec++]='\xa8';
+				buffer_server_rec[len_server_rec++]='\x64';
+				buffer_server_rec[len_server_rec++]='\x01';
+				buffer_server_rec[len_server_rec]='\0';
 
-                tmp1 = 0;
+				tmp1 = 0;
 				while(tmp1<len_server_rec)
 				{
 					if((tmp1+=sendto(sockfd_server,buffer_server_rec+tmp1,(len_server_rec-tmp1),0,(struct sockaddr *)&addr_server_send,sin_size))< 0)
-                	{
-                       		perror("response 192.168.100.1 to terminal");
-                    		printf("response 192.168.100.1 timeout!!!\n ");
-               		}
+					{
+						perror("response 192.168.100.1 to terminal");
+						printf("response 192.168.100.1 timeout!!!\n ");
+					}	
 				}
 				break;
-            }
-			case 2 :
-			{
+
+			case 2:
 				printf("url : ailvgoserver | ailvgo is found!!\n");
-			
-		    	buffer_server_rec[2]='\x81';
-                buffer_server_rec[3]='\x80';
-                buffer_server_rec[7]='\x01';
-                buffer_server_rec[len_server_rec++]='\xc0';
-            	buffer_server_rec[len_server_rec++]='\x0c';
-           	    buffer_server_rec[len_server_rec++]='\x00';
-           	    buffer_server_rec[len_server_rec++]='\x01';
-           	    buffer_server_rec[len_server_rec++]='\x00';
-           	    buffer_server_rec[len_server_rec++]='\x01';
-           	    buffer_server_rec[len_server_rec++]='\x00';
-          	    buffer_server_rec[len_server_rec++]='\x00';
-           	    buffer_server_rec[len_server_rec++]='\x00';
-           	    buffer_server_rec[len_server_rec++]='\xa0';
-          	    buffer_server_rec[len_server_rec++]='\x00';
-           	    buffer_server_rec[len_server_rec++]='\x04';
-           	    buffer_server_rec[len_server_rec++]='\xc0';
-             	buffer_server_rec[len_server_rec++]='\xa8';
-           	    buffer_server_rec[len_server_rec++]='\x64';
-           	    buffer_server_rec[len_server_rec++]='\x02';
-           	    buffer_server_rec[len_server_rec]='\0';
 
-                tmp1 = 0;
+				buffer_server_rec[2]='\x81';
+			    buffer_server_rec[3]='\x80';
+			    buffer_server_rec[7]='\x01';
+				buffer_server_rec[len_server_rec++]='\xc0';
+				buffer_server_rec[len_server_rec++]='\x0c';
+			    buffer_server_rec[len_server_rec++]='\x00';
+			    buffer_server_rec[len_server_rec++]='\x01';
+				buffer_server_rec[len_server_rec++]='\x00';
+				buffer_server_rec[len_server_rec++]='\x01';
+				buffer_server_rec[len_server_rec++]='\x00';
+				buffer_server_rec[len_server_rec++]='\x00';
+				buffer_server_rec[len_server_rec++]='\x00';
+				buffer_server_rec[len_server_rec++]='\xa0';
+				buffer_server_rec[len_server_rec++]='\x00';
+				buffer_server_rec[len_server_rec++]='\x04';
+				buffer_server_rec[len_server_rec++]='\xc0';
+				buffer_server_rec[len_server_rec++]='\xa8';
+				buffer_server_rec[len_server_rec++]='\x64';
+				buffer_server_rec[len_server_rec++]='\x02';
+				buffer_server_rec[len_server_rec]='\0';
+	
+		        tmp1 = 0;
 				while(tmp1<len_server_rec)
 				{
 					if((tmp1+=sendto(sockfd_server,buffer_server_rec+tmp1,(len_server_rec-tmp1),0,(struct sockaddr *)&addr_server_send,sin_size))< 0)
-                	{
-                       		perror("response 192.168.100.2 to terminal");
-                    		printf("response 192.168.100.2 timeout!!!\n ");
-               		}
+					{
+						perror("response 192.168.100.2 to terminal");
+						printf("response 192.168.100.2 timeout!!!\n ");
+					}
 				}
 				break;
-			}
+		
 			default :
 				printf("error dns request!\n");
 		}
 	}
 	sys_log("mydns : error!");
     return 0;
+}
+
+
+int get_control()
+{
+	sqlite3 *db;
+	int rc = 0;
+	sqlite3_stmt *ppstmt = NULL;
+	char sql[256] = {0};
+	const char* control = NULL;
+
+	rc = sqlite3_open(domain_db,&db);
+	if(rc!=SQLITE_OK)
+	{
+		printf("open database error");
+	}
+
+	memset(sql,0,sizeof(sql));
+    sprintf(sql,"select enable from domain_control");
+	sqlite3_prepare(db, sql, -1, &ppstmt, 0);
+	rc = sqlite3_step(ppstmt);
+	if(rc==SQLITE_ROW)
+	{
+		control = sqlite3_column_text(ppstmt,0);
+	}
+	sqlite3_finalize(ppstmt);
+	sqlite3_close(db);
+
+	if(strcmp(control,"on")==0)
+		return 1;
+	else	
+		return 0;
 }

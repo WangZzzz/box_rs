@@ -1,6 +1,6 @@
 /**************************
  * Filename: box_login.c
- * Date : 2015-03-05
+ * Date : 2015-05-09
  * ***********************/
 
 #include <stdio.h>
@@ -68,16 +68,14 @@ int ParseJSON(cJSON *jnode, char wan_driver[5], int iptables_flag)
     cJSON *wanipArray = cJSON_GetObjectItem(node, "wan_ip");
     if(!wanipArray)
     {
-            bail("parse result : json has no node named wan_ip");
-            return 0;
-    }
+        bail("parse result : json has no node named wan_ip");
+        return 0;
+    }	
 
 	cJSON *wanipList = wanipArray->child;
         
-        if((wan_ip = cJSON_GetObjectItem(wanipList, "ip")->valuestring) != NULL)
-        {
-        	printf("ip : %s\n", cJSON_GetObjectItem(wanipList, "ip")->valuestring);
-        }
+    if((wan_ip = cJSON_GetObjectItem(wanipList, "ip")->valuestring) != NULL)
+        printf("ip : %s\n", cJSON_GetObjectItem(wanipList, "ip")->valuestring);
 
 	printf("wan_ip : %s\n", wan_ip);
 
@@ -86,44 +84,37 @@ int ParseJSON(cJSON *jnode, char wan_driver[5], int iptables_flag)
 		printf("iptables : set to any!\n");
 
         if(iptables_flag == 1)
-		{
 			printf("iptables has set successfully!\n");
-		}
 		else
-		{
 			printf("iptables set immediately...\n");
 
-		    switch(atoi(wan_driver))
+		switch(atoi(wan_driver))
+		{
+			case 10 :
 			{
-				case 10 :
-				{
-					printf("iptables -t nat -A POSTROUTING -o wlan0 -s 192.168.100.0/24 -j MASQUERADE\n");
-					system("iptables -t nat -A POSTROUTING -o wlan0 -s 192.168.100.0/24 -j MASQUERADE");
-					break;
-				}
-				case 20 :
-				{
-					printf("iptables -t nat -A POSTROUTING -o eth1 -s 192.168.100.0/24 -j MASQUERADE\n");
-					system("iptables -t nat -A POSTROUTING -o eth1 -s 192.168.100.0/24 -j MASQUERADE");
-					break;
-				}
-				default :
-				{
-					printf("iptables -t nat -A POSTROUTING -o ppp0 -s 192.168.100.0/24 -j MASQUERADE\n");
-					system("iptables -t nat -A POSTROUTING -o ppp0 -s 192.168.100.0/24 -j MASQUERADE");
-					break;
-				}
+				printf("iptables -t nat -A POSTROUTING -o wlan0 -s 192.168.100.0/24 -j MASQUERADE\n");
+				system("iptables -t nat -A POSTROUTING -o wlan0 -s 192.168.100.0/24 -j MASQUERADE");
+				break;
 			}
-			sys_log("box_login, wan = any!");
+			case 20 :
+			{
+				printf("iptables -t nat -A POSTROUTING -o eth1 -s 192.168.100.0/24 -j MASQUERADE\n");
+				system("iptables -t nat -A POSTROUTING -o eth1 -s 192.168.100.0/24 -j MASQUERADE");
+				break;
+			}
+			default :
+			{
+				printf("iptables -t nat -A POSTROUTING -o ppp0 -s 192.168.100.0/24 -j MASQUERADE\n");
+				system("iptables -t nat -A POSTROUTING -o ppp0 -s 192.168.100.0/24 -j MASQUERADE");
+				break;
+			}
 		}
- 
+		sys_log("box_login, wan = any!");
 	}
-	else if(strcmp(wan_ip, "none") == 0)
+	else
 	{
-         printf("iptables : set to none!\n"); 
-                       
-         sys_log("box_login, wan = none!");
-
+		printf("iptables : set to none!\n"); 
+        sys_log("box_login, wan = none!");
     }
 }
 
@@ -211,57 +202,178 @@ int main()
     char box_id_tmp[10] = {0}, wan_driver_tmp[5] = {0};
 	char request_url[150] = {0};
 	int iptables_flag = 0;
+	
+	FILE *stream = NULL;
+	char buf[1024] = {0};
+	int cnt = 0;
+
+	int db_cnt;
 
     printf("*******************************\n"); 
-    printf("box_login : start\n");
+   	printf("box_login : start\n");
     printf("*******************************\n");
 
-	rc = sqlite3_open(box_db, &db);
-    if(rc == SQLITE_ERROR)
-    {
-        bail("open box.db failed");
-    }	
+    //heart_beat_run start
+	printf("-------------------------------\n");
+    printf("heart_beat_run: start\n");
 
-	ppstmt = NULL;
-    memset(sql_cmd, 0, sizeof(sql_cmd));
-    strcpy(sql_cmd, "select box_id, wan_driver from box_info");
-    sqlite3_prepare(db, sql_cmd, -1, &ppstmt, 0);
-    rc = sqlite3_step(ppstmt);
-    if(rc == SQLITE_ROW)
+	stream = NULL;
+	if((stream = popen("ps -ef | grep 'heart_beat' | grep -v 'grep' | grep -v 'sh -c' | awk '{print $2}' | wc -l", "r")) == NULL)
+		printf("popen failed\n");
+    
+	memset(buf, 0, sizeof(buf));
+    fread(buf, sizeof(char), sizeof(buf), stream);
+    buf[1023] = '\0';
+    sscanf(buf, "%d", &cnt);
+    pclose(stream);
+    printf("heart_beat process : %d\n", cnt);
+        
+    if(cnt >= 1)
+		printf("heart_beat_run is running!\n");
+    else
     {
-            box_id = sqlite3_column_text(ppstmt, 0);
+    		system(heart_beat_run);
+    		sleep(1);
+	}
+
+    //remote_control_run start
+	printf("-------------------------------\n");
+    printf("remote_control_run : start\n");
+	
+	stream = NULL;
+	if((stream = popen("ps -ef | grep 'remote_control' | grep -v 'grep' | grep -v 'sh -c' | awk '{print $2}' | wc -l", "r")) == NULL)
+		printf("popen failed\n");
+    
+	memset(buf, 0, sizeof(buf));
+    fread(buf, sizeof(char), sizeof(buf), stream);
+    buf[1023] = '\0';
+    sscanf(buf, "%d", &cnt);
+    pclose(stream);
+    printf("remote_control_run process : %d\n", cnt);
+        
+    if(cnt >= 1)
+		printf("remote_control_run is running!\n");
+    else
+    {
+    	system(remote_control_run);
+		sleep(1);
+	}
+
+    //run_daemon start
+	printf("-------------------------------\n");
+    printf("run_daemon : start\n");
+	
+	stream = NULL;
+	if((stream = popen("ps -ef | grep 'run_daemon' | grep -v 'grep' | grep -v 'sh -c' | awk '{print $2}' | wc -l", "r")) == NULL)
+		printf("popen failed\n");
+    
+	memset(buf, 0, sizeof(buf));
+    fread(buf, sizeof(char), sizeof(buf), stream);
+    buf[1023] = '\0';
+    sscanf(buf, "%d", &cnt);
+    pclose(stream);
+    printf("run_daemon process : %d\n", cnt);
+        
+    if(cnt >= 1)
+		printf("run_daemon is running!\n");
+    else
+    {
+    	system(run_daemon);
+		sleep(1);
+	}
+
+	//udp_start start
+	printf("-------------------------------\n");
+    printf("udp_start: start\n");
+    	
+	stream = NULL;
+	if((stream = popen("ps -ef | grep 'udp_get' | grep -v 'grep' | grep -v 'sh -c' | awk '{print $2}' | wc -l", "r")) == NULL)
+		printf("popen failed\n");
+    
+	memset(buf, 0, sizeof(buf));
+    fread(buf, sizeof(char), sizeof(buf), stream);
+    buf[1023] = '\0';
+    sscanf(buf, "%d", &cnt);
+    pclose(stream);
+    printf("udp_get process : %d\n", cnt);
+        
+    if(cnt >= 1)
+		printf("udp_get is running!\n");
+    else
+    {
+		system(udp_start);
+		sleep(1);
+	}
+
+	db_cnt = 0;
+	while(db_cnt < 20)
+	{
+		rc = sqlite3_open(box_db, &db);
+    	if(rc == SQLITE_ERROR)
+        	bail("open box.db failed");
+
+		ppstmt = NULL;
+    	memset(sql_cmd, 0, sizeof(sql_cmd));
+    	strcpy(sql_cmd, "select box_id, wan_driver from box_info");
+    	sqlite3_prepare(db, sql_cmd, -1, &ppstmt, 0);
+    	rc = sqlite3_step(ppstmt);
+    		
+		if(rc == SQLITE_ROW)
+    	{
+			box_id = sqlite3_column_text(ppstmt, 0);
             strcpy(box_id_tmp, box_id);
             printf("box_id : %s\n", box_id_tmp);
             wan_driver = sqlite3_column_text(ppstmt, 1);
             strcpy(wan_driver_tmp, wan_driver);
-			printf("wan_driver : %s\n", wan_driver_tmp);
-    }
+            printf("wan_driver : %s\n", wan_driver_tmp);
+    		sqlite3_finalize(ppstmt);
+    		sqlite3_close(db);
+			break;
+    	}
+		else
+		{
+			printf("select box_id,wan_driver failure!\n");
+    		sqlite3_finalize(ppstmt);
+    		sqlite3_close(db);
+			sleep(1);
+			db_cnt++;
+		}
+	}
 
-    sqlite3_finalize(ppstmt);
-    sqlite3_close(db);
-
-    rc = sqlite3_open(mobile_db, &db);
-    if(rc == SQLITE_ERROR)
-    {
+	db_cnt = 0;
+	while(db_cnt < 20)
+	{
+    	rc = sqlite3_open(mobile_db, &db);
+    	if(rc == SQLITE_ERROR)
             bail("open mobile.db failed");
-    }
 
-	ppstmt1 = NULL;
-    memset(sql_cmd, 0, sizeof(sql_cmd));
-    strcpy(sql_cmd, "select count(*) from mobile_info");
-    sqlite3_prepare(db, sql_cmd, -1, &ppstmt1, 0);
-    rc = sqlite3_step(ppstmt1);
-    if(rc == SQLITE_ROW)
-    {
+		ppstmt1 = NULL;
+    	memset(sql_cmd, 0, sizeof(sql_cmd));
+    	strcpy(sql_cmd, "select count(*) from mobile_info");
+    	sqlite3_prepare(db, sql_cmd, -1, &ppstmt1, 0);
+    	rc = sqlite3_step(ppstmt1);
+    
+		if(rc == SQLITE_ROW)
+    	{
           	app_count = atoi(sqlite3_column_text(ppstmt1, 0));
             printf("app_count : %d\n", app_count);
-    }
-    sqlite3_finalize(ppstmt1);
-    sqlite3_close(db);
-
+    		sqlite3_finalize(ppstmt1);
+    		sqlite3_close(db);
+			break;
+		}
+		else
+		{
+			printf("select count(*) failure!\n");
+    		sqlite3_finalize(ppstmt1);
+    		sqlite3_close(db);
+			sleep(1);
+			db_cnt++;
+		}
+	}
+			
 	printf("--------------send login request -------------\n");
 	memset(request_url, 0, sizeof(request_url));
-	sprintf(request_url, "http://www.ailvgobox.com/box_manage/box_logon.php?box_id=%s&app_count=%d", box_id_tmp, app_count);
+	sprintf(request_url, "http://www.ailvgobox.com/box_manage_2/box_logon_1.php?box_id=%s&app_count=%d", box_id_tmp, app_count);
 	request_url[149] = '\0';
 	printf("request_url : %s\n", request_url);
 	req = ghttp_request_new();
@@ -326,45 +438,19 @@ int main()
 	}
     
 	if(strlen(http_body) > 0)
-    {
 		printf("HTTP success!\n");
 
-        if(strcmp(http_body, "null") == 0)
-        {
-              	printf("http_body : null, illegal box_id!\n");
-               	printf("box_login failure!");
-               	sys_log("login failure, illegal box_id");
-        }
-        else
-        {
-		       	node = cJSON_Parse(http_body);
-                ParseJSON(node, wan_driver_tmp, iptables_flag);
-
-        		//heart_beat_run start
-				printf("-------------------------------\n");
-        		printf("heart_beat_run: start\n");
-        		system(heart_beat_run);
-      			sleep(1);
-
-        		//remote_control_run start
-				printf("-------------------------------\n");
-        		printf("remote_control_run : start\n");
-        		system(remote_control_run);
-				sleep(1);
-
-    			//run_daemon start
-				printf("-------------------------------\n");
-       			printf("run_daemon : start\n");
-      		    system(run_daemon);
-        		sleep(1);
-
-				//udp_start start
-				printf("-------------------------------\n");
-        		printf("udp_start: start\n");
-       			system(udp_start);
-        		sleep(1);
-		}
+    if(strcmp(http_body, "null") == 0)
+    {
+        printf("http_body : null, illegal box_id!\n");
+        printf("box_login failure!");
+        sys_log("login failure, illegal box_id");
     }
+    else
+    {
+		node = cJSON_Parse(http_body);
+        ParseJSON(node, wan_driver_tmp, iptables_flag);
+	}
 
     printf("box_login : complete!\n");
 	

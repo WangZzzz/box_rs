@@ -1,7 +1,6 @@
 /*************************************************************************     
   > File Name: wan_start.c
-  > Created Time: 2015-03-06
-  > Function: 
+  > Created Time: 2015-05-09
  ************************************************************************/     
 
 #include<stdio.h>
@@ -11,12 +10,57 @@
 
 #define box_db "/ailvgo/www/database/box.db"
 
+#define PING_FREQUENCY 2
+
 int sql_data();
+
+int wan_monitor()
+{
+	FILE *stream;
+	char buf_qq[1024] = {0};
+	int cnt;
+	int wan_break = 1;
+	
+	memset(buf_qq, 0, sizeof(buf_qq));
+	
+	for(cnt = 0; cnt < PING_FREQUENCY; ++cnt)
+	{
+		printf("ping -c 1 www.qq.com\n");
+        stream = popen("ping -c 1 www.qq.com", "r");
+		fread(buf_qq, sizeof(char), sizeof(buf_qq), stream);
+		buf_qq[1023] = '\0';
+        pclose(stream);
+		printf("buf_qq : %s\n", buf_qq);
+		
+		if(strstr(buf_qq, "1 received"))
+        {   
+			wan_break = 0;
+			break;
+        }
+
+		sleep(5);
+	}
+
+	if(wan_break == 1)
+		return 1;
+	else
+	 	return 0;
+}
 
 int main()
 {
+	printf("\n------------------------------\n");
+	printf("wan_start : start!\n");
+	printf("-------------------------------\n");
+
 	int sh;
 	char sh_path[256]={0};
+
+	if(wan_monitor() == 0)
+	{
+		printf("wan : started!\n");
+		exit(0);
+	}
 
 	sh=sql_data();
 
@@ -55,14 +99,12 @@ int main()
 	}
 
 	if(sh == 10)
-	{
 		printf("usb/wifi module\n");
-	}
 
 	if(sh == 20)
-	{
 		printf("usb/ethernet module\n");
-	}
+
+	printf("wan_start : complete!\n");
 }
 
 int sql_data()
@@ -71,36 +113,33 @@ int sql_data()
 	char sql[256]={0};
 	sqlite3 *db=NULL;
 	sqlite3_stmt *ppstmt=NULL;
+	int cnt;
 
-	rc=sqlite3_open(box_db, &db);
-	if(rc != SQLITE_OK)
+	while(cnt < 20)
 	{
-		printf("open database error!!\n");
-		return 0;
-	}
+		rc=sqlite3_open(box_db, &db);
+		if(rc != SQLITE_OK)
+			printf("open database error!!\n");
 
-	memset(sql,0,sizeof(sql));
-	sprintf(sql,"select wan_driver from box_info");
-	sqlite3_prepare(db,sql,-1,&ppstmt,0);
-	if(rc != SQLITE_OK)
-	{
-		fprintf(stderr,"SQL error:%s\n",sqlite3_errmsg(db));
+		memset(sql,0,sizeof(sql));
+		sprintf(sql,"select wan_driver from box_info");
+		sqlite3_prepare(db,sql,-1,&ppstmt,0);
+		rc=sqlite3_step(ppstmt);
+		if(rc ==SQLITE_ROW)
+		{
+			wan_driver=sqlite3_column_int(ppstmt,0);
+			sqlite3_finalize(ppstmt);
+			sqlite3_close(db);
+			return wan_driver;
+		}
+		else
+		{
+			sqlite3_finalize(ppstmt);
+			sqlite3_close(db);
+			sleep(1);
+			cnt++;
+		}
 	}
-	rc=sqlite3_step(ppstmt);
-	if(rc ==SQLITE_ROW)
-	{
-		wan_driver=sqlite3_column_int(ppstmt,0);
-		sqlite3_finalize(ppstmt);
-		sqlite3_close(db);
-		//printf("wan_driver : %d\n",wan_driver);
-		return wan_driver;
-	}
-	else
-	{
-		sqlite3_finalize(ppstmt);
-		sqlite3_close(db);
-		return 0;
-	}
+	return 0;
 }
-
 

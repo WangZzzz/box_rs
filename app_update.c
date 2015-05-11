@@ -412,7 +412,7 @@ int main()
         sqlite3_close(db);
 
 	printf("------------send app_update request------------\n");
-	sprintf(request_url, "http://www.ailvgobox.com/box_manage/app_update.php?box_id=%s&android_phone=%s&ios_phone=%s&android_pad=%s&ios_pad=%s", box_id_tmp, android_phone_version, ios_phone_version, android_pad_version, ios_pad_version);
+	sprintf(request_url, "http://www.ailvgobox.com/box_manage_2/app_update_1.php?box_id=%s&android_phone=%s&ios_phone=%s&android_pad=%s&ios_pad=%s", box_id_tmp, android_phone_version, ios_phone_version, android_pad_version, ios_pad_version);
 	printf("request_url : %s\n", request_url);	
 	req = ghttp_request_new();
 	strcpy(http_body, send_http_request(req, request_url));

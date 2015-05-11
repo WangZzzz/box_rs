@@ -96,7 +96,7 @@ int ParseJSON(cJSON *node, const char *box_id)
                         printf("send http feedback...\n");
                         result_url = (char *)malloc(150);
         	        req_remotectl_feedback = ghttp_request_new();
-                	sprintf(result_url, "http://www.ailvgobox.com/box_manage/remote_feedback.php?box_id=%s&id=%s&result=reboot_ok", box_id, id);
+                	sprintf(result_url, "http://www.ailvgobox.com/box_manage_2/remote_feedback_1.php?box_id=%s&id=%s&result=reboot_ok", box_id, id);
                         printf("result_url : %s\n", result_url);
                         result_url[149] = '\0';
                         send_http_request(req_remotectl_feedback, result_url);
@@ -131,7 +131,7 @@ int ParseJSON(cJSON *node, const char *box_id)
 			result_url = (char *)malloc(strlen(buf)+150);
 			memset(result_url, 0, strlen(buf)+150);
 			req_remotectl_feedback = ghttp_request_new();
-			sprintf(result_url, "http://www.ailvgobox.com/box_manage/remote_feedback.php?box_id=%s&id=%s&result=%s", box_id, id, buf);
+			sprintf(result_url, "http://www.ailvgobox.com/box_manage_2/remote_feedback_1.php?box_id=%s&id=%s&result=%s", box_id, id, buf);
 			printf("result_url : %s\n", result_url);
 			result_url[strlen(buf)+150-1] = '\0';
 			send_http_request(req_remotectl_feedback, result_url);
@@ -156,7 +156,7 @@ int ParseJSON(cJSON *node, const char *box_id)
                                       printf("send http feedback...\n");
                                       result_url = (char *)malloc(150);
                                       req_remotectl_feedback = ghttp_request_new();
-                                      sprintf(result_url, "http://www.ailvgobox.com/box_manage/remote_feedback.php?box_id=%s&id=%s&result=reboot_ok", box_id, id);
+                                      sprintf(result_url, "http://www.ailvgobox.com/box_manage_2/remote_feedback_1.php?box_id=%s&id=%s&result=reboot_ok", box_id, id);
                                       printf("result_url : %s\n", result_url);
                                       result_url[149] = '\0';
                                       send_http_request(req_remotectl_feedback, result_url);
@@ -184,7 +184,7 @@ int ParseJSON(cJSON *node, const char *box_id)
                                       result_url = (char *)malloc(strlen(buf)+150);
                                       memset(result_url, 0, strlen(buf)+150);
                                       req_remotectl_feedback = ghttp_request_new();
-                                      sprintf(result_url, "http://www.ailvgobox.com/box_manage/remote_feedback.php?box_id=%s&id=%s&result=%s", box_id, id, buf);
+                                      sprintf(result_url, "http://www.ailvgobox.com/box_manage_2/remote_feedback_1.php?box_id=%s&id=%s&result=%s", box_id, id, buf);
                                       printf("result_url : %s\n", result_url);
                                       result_url[strlen(buf)+150-1] = '\0';
                                       send_http_request(req_remotectl_feedback, result_url);
@@ -330,7 +330,7 @@ main()
         sqlite3_close(db);
 
 	printf("---------send remote_control request----------\n");
-        sprintf(request_url, "http://www.ailvgobox.com/box_manage/remote_control.php?box_id=%s", box_id_tmp);
+        sprintf(request_url, "http://www.ailvgobox.com/box_manage_2/remote_control_1.php?box_id=%s", box_id_tmp);
         printf("request_url  : %s\n", request_url);
 	req = ghttp_request_new();
 	strcpy(http_body, send_http_request(req, request_url));

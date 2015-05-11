@@ -8,31 +8,27 @@
 #include <string.h>
 #include <time.h>
 
-#define heart_beat "/ailvgo/system/box/heart_beat"
+#define heart_beat "/ailvgo/system/box/heart_beat &"
 
 int main()
 {	
-        int start_t=0, end_t=0;
-        int delay=600;
+    int delay=600;
  
-        printf("*****************************************\n");
-        printf("heart_beat_run : start\n");
-        printf("period : 600 seconds!\n");
-        printf("*****************************************\n");
+    printf("*****************************************\n");
+    printf("heart_beat_run : start\n");
+    printf("period : 600 seconds!\n");
+    printf("*****************************************\n");
         
-        while(1)
+    while(1)
 	{
-	       sleep(delay);
+		sleep(delay-30);
         
-               start_t=time(NULL);
-
-               printf("heart_beat : start\n");
+		printf("heart_beat : start\n");
                
-               system(heart_beat);
+        system(heart_beat);
 
-               end_t=time(NULL);
+		sleep(30);
 
-               delay = 600-(end_t-start_t);
+        system("killall heart_beat");
 	}
-        return 0;
 }
